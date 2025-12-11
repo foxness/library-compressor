@@ -11,7 +11,10 @@ converted_extensions = ['avif', 'jxl', 'webp']
 valid_extensions = ['png', 'jpg', 'jpeg', 'gif']
 
 converted_lock = threading.Lock()
-print_lock = threading.Lock()
+print_log_lock = threading.Lock()
+
+log_path = '/Volumes/Athena/river-lib/conversion.log'
+conversion_log = ""
 
 def get_size(dir_path):
     # -ks for size in kilobytes
@@ -28,7 +31,8 @@ def convert(path):
         # handle the error
         return None
 
-    subprocess.run(['rm', path], stdout = subprocess.DEVNULL)
+    os.remove(path)
+
     return new_path
 
 def process_one(dir_path, index, total_count, name):
@@ -95,7 +99,9 @@ def worker(name, queue, total_count):
         queue.task_done()
 
 def safe_print(*a, **b):
-    with print_lock:
+    with print_log_lock:
+        global conversion_log
+        conversion_log += f'{a[0]}\n'
         print(*a, **b)
 
 def start_work(image_dirs):
@@ -120,6 +126,7 @@ def human_size(size, source_is_kilobytes):
 
 def main():
     start = time.time()
+    safe_print(f'starting conversion of {source_dir}')
 
     size = get_size(source_dir)
     image_dirs = [f.path for f in os.scandir(source_dir) if f.is_dir()]
@@ -139,5 +146,8 @@ def main():
     safe_print(f'converted {converted_count} files out of {total_count}')
     safe_print(f'old size: {human_size(size, True)}, new size: {human_size(new_size, True)}, reduction: {reduction:.2f}%')
     safe_print(f'finished in {elapsed:.2f}s, speed: {(total_count / elapsed):.2f} files/s')
+
+    with open(log_path, 'w') as file:
+        file.write(conversion_log)
 
 main()
