@@ -6,7 +6,10 @@ import threading
 import queue
 import time
 
-source_dir = '/Volumes/Athena/river-lib/small_lib_jxl_4'
+source_dir = '/Volumes/Athena/river-lib/small_lib copy'
+
+default_img_format = 'jxl'
+
 converted_extensions = ['avif', 'jxl', 'webp']
 valid_extensions = ['png', 'jpg', 'jpeg', 'gif']
 
@@ -16,6 +19,14 @@ print_log_lock = threading.Lock()
 log_path = '/Volumes/Athena/river-lib/conversion.log'
 conversion_log = ""
 
+def get_jxl_base_args(iteration):
+    distance = 2 + iteration
+    return ['cjxl', '--lossless_jpeg=0', '-d', str(distance)]
+
+def get_avif_base_args(iteration):
+    quality = 80 - (iteration * 10)
+    return ['avifenc', '-q', str(quality)]
+
 def get_size(dir_path):
     # -ks for size in kilobytes
     # -ms for size in megabytes
@@ -23,7 +34,7 @@ def get_size(dir_path):
     return int(result.stdout.split('\t')[0])
 
 def convert(path, name):
-    img_format = 'jxl'
+    img_format = default_img_format
     old_size = os.path.getsize(path)
 
     new_size = None
@@ -42,12 +53,10 @@ def convert(path, name):
         args = None
         stderr = None
         if img_format == 'avif':
-            quality = 80 - (iteration * 10)
-            args = ['avifenc', '-q', str(quality), old_path, new_path]
+            args = get_avif_base_args(iteration) + [old_path, new_path]
 
         elif img_format == 'jxl':
-            distance = 4 + iteration
-            args = ['cjxl', '--lossless_jpeg=0', '-d', str(distance), old_path, new_path]
+            args = get_jxl_base_args(iteration) + [old_path, new_path]
             stderr = subprocess.DEVNULL
 
         if iteration != 0:
