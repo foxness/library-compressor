@@ -8,7 +8,14 @@ import time
 
 source_dir = '/Volumes/Athena/river-lib/small_lib copy'
 
+worker_count = 8
+encoder_thread_count = None
+
+# optimal for jxl: w8 e4
+
 default_img_format = 'jxl'
+base_jxl_distance = 2
+base_avif_quality = 80
 
 converted_extensions = ['avif', 'jxl', 'webp']
 valid_extensions = ['png', 'jpg', 'jpeg', 'gif']
@@ -16,16 +23,29 @@ valid_extensions = ['png', 'jpg', 'jpeg', 'gif']
 converted_lock = threading.Lock()
 print_log_lock = threading.Lock()
 
-log_path = '/Volumes/Athena/river-lib/conversion.log'
+log_dir = '/Volumes/Athena/river-lib/'
 conversion_log = ""
 
+def get_log_name():
+    q = base_jxl_distance if default_img_format == 'jxl' else base_avif_quality
+    e = f'_e{encoder_thread_count}' if encoder_thread_count != None else ''
+    return f'log_{default_img_format}_{q}_w{worker_count}{e}.log'
+
 def get_jxl_base_args(iteration):
-    distance = 2 + iteration
-    return ['cjxl', '--lossless_jpeg=0', '-d', str(distance)]
+    distance = base_jxl_distance + iteration
+    args = ['cjxl', '--lossless_jpeg=0', '-d', str(distance)]
+    if encoder_thread_count != None:
+        args += [f'--num_threads={encoder_thread_count}']
+
+    return args
 
 def get_avif_base_args(iteration):
-    quality = 80 - (iteration * 10)
-    return ['avifenc', '-q', str(quality)]
+    quality = base_avif_quality - (iteration * 10)
+    args = ['avifenc', '-q', str(quality)]
+    if encoder_thread_count != None:
+        args += ['-j', str(encoder_thread_count)]
+
+    return args
 
 def get_size(dir_path):
     # -ks for size in kilobytes
@@ -43,7 +63,7 @@ def convert(path, name):
 
     while True:
         if iteration == max_iterations:
-            safe_print(f'[{name}] mission failed, we\'ll get them next time')
+            safe_print(f'[{name}] mission failed, we\'ll get them next time (i tried {iteration} time{'' if iteration == 1 else 's'})')
             return None
 
         old_path = Path(path)
@@ -118,16 +138,16 @@ def process_one(dir_path, index, total_count, name):
     readable_old_size = human_size(old_size, False)
     readable_new_size = human_size(new_size, False)
 
-    to_print = f"[{name}] converted.\t" \
-    f"old size: {readable_old_size},\t" \
-    f"new size: {readable_new_size},\t" \
-    f"reduction: {reduction:.2f}%,\t" \
-    f"progress: {index}/{total_count} {progress:.2f}%"
+    to_print = f"[{name}] done.\t" \
+    f"old: {readable_old_size},\t" \
+    f"new: {readable_new_size},\t" \
+    f"r: {reduction:.2f}%,\t" \
+    f"{index}/{total_count} {progress:.2f}%"
     safe_print(to_print)
 
     return True
 
-def worker(name, queue, total_count):
+def work(name, queue, total_count):
     while True:
         index, image_dir = queue.get()
 
@@ -149,10 +169,9 @@ def start_work(image_dirs):
     q = queue.Queue()
     total_count = len(image_dirs)
 
-    worker_count = 5
     workers = []
     for i in range(worker_count):
-        workerThread = threading.Thread(target=worker, args=[f'Worker {i + 1}', q, total_count], daemon=True)
+        workerThread = threading.Thread(target=work, args=[f'W{i:02d}', q, total_count], daemon=True)
         workers.append(workerThread)
         workerThread.start()
 
@@ -188,6 +207,7 @@ def main():
     safe_print(f'old size: {human_size(size, True)}, new size: {human_size(new_size, True)}, reduction: {reduction:.2f}%')
     safe_print(f'finished in {elapsed:.2f}s, speed: {(total_count / elapsed):.2f} files/s')
 
+    log_path = log_dir + get_log_name()
     with open(log_path, 'w') as file:
         file.write(conversion_log)
 
