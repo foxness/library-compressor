@@ -39,18 +39,15 @@ def process_one(dir_path, index, total_count, name):
 
     extension = metadata['ext']
     image_name = metadata['name'] + '.' + extension
-    with print_lock:
-        print(f'[{name}] processing {image_name}')
+    safe_print(f'[{name}] processing {image_name}')
 
     if extension in converted_extensions:
-        with print_lock:
-            print(f'[{name}] {extension} is already converted, skipping')
+        safe_print(f'[{name}] {extension} is already converted, skipping')
 
         return False
 
     if extension not in valid_extensions:
-        with print_lock:
-            print(f'[{name}] {extension} is not a valid extension, skipping')
+        safe_print(f'[{name}] {extension} is not a valid extension, skipping')
 
         return False
 
@@ -59,8 +56,7 @@ def process_one(dir_path, index, total_count, name):
 
     new_path = convert(path)
     if new_path == None:
-        with print_lock:
-            print(f'[{name}] error during conversion, skipping')
+        safe_print(f'[{name}] error during conversion, skipping')
 
         return False
 
@@ -76,8 +72,13 @@ def process_one(dir_path, index, total_count, name):
     progress = (index / total_count) * 100
     readable_size = human_size(size, False)
     readable_new_size = human_size(new_size, False)
-    with print_lock:
-        print(f'[{name}] converted.\told size: {readable_size},\tnew size: {readable_new_size},\treduction: {reduction:.2f}%,\tprogress: {index}/{total_count} {progress:.2f}%')
+
+    to_print = f"[{name}] converted.\t" \
+    f"old size: {readable_size},\t" \
+    f"new size: {readable_new_size},\t" \
+    f"reduction: {reduction:.2f}%,\t" \
+    f"progress: {index}/{total_count} {progress:.2f}%"
+    safe_print(to_print)
 
     return True
 
@@ -93,11 +94,15 @@ def worker(name, queue, total_count):
 
         queue.task_done()
 
+def safe_print(*a, **b):
+    with print_lock:
+        print(*a, **b)
+
 def start_work(image_dirs):
     q = queue.Queue()
     total_count = len(image_dirs)
 
-    worker_count = 4
+    worker_count = 5
     workers = []
     for i in range(worker_count):
         workerThread = threading.Thread(target=worker, args=[f'Worker {i + 1}', q, total_count], daemon=True)
@@ -108,7 +113,7 @@ def start_work(image_dirs):
         q.put([index, image_dir])
 
     q.join()
-    print('all work completed')
+    safe_print('all work completed')
 
 def human_size(size, source_is_kilobytes):
     return f'{size / 1024:.2f}' + ('mb' if source_is_kilobytes else 'kb')
@@ -131,8 +136,8 @@ def main():
     end = time.time()
     elapsed = end - start
 
-    print(f'converted {converted_count} files out of {total_count}')
-    print(f'old size: {human_size(size, True)}, new size: {human_size(new_size, True)}, reduction: {reduction:.2f}%')
-    print(f'finished in {elapsed:.2f}s, speed: {(total_count / elapsed):.2f} files/s')
+    safe_print(f'converted {converted_count} files out of {total_count}')
+    safe_print(f'old size: {human_size(size, True)}, new size: {human_size(new_size, True)}, reduction: {reduction:.2f}%')
+    safe_print(f'finished in {elapsed:.2f}s, speed: {(total_count / elapsed):.2f} files/s')
 
 main()
