@@ -6,7 +6,7 @@ import threading
 import queue
 import time
 
-source_dir = '/Volumes/Athena/river-lib/small_lib copy'
+source_dir = '/Volumes/Athena/river-lib/small_lib_jxl_4'
 converted_extensions = ['avif', 'jxl', 'webp']
 valid_extensions = ['png', 'jpg', 'jpeg', 'gif']
 
@@ -22,18 +22,51 @@ def get_size(dir_path):
     result = subprocess.run(['du', '-ks', dir_path], capture_output=True, text=True)
     return int(result.stdout.split('\t')[0])
 
-def convert(path):
-    path = Path(path)
-    new_path = path.with_suffix('.avif').resolve()
-    path = path.resolve()
-    encode_result = subprocess.run(['avifenc', path, new_path], stdout = subprocess.DEVNULL)
-    if encode_result.returncode != 0:
-        # handle the error
-        return None
+def convert(path, name):
+    img_format = 'jxl'
+    old_size = os.path.getsize(path)
+
+    new_size = None
+    iteration = 0
+    max_iterations = 1
+
+    while True:
+        if iteration == max_iterations:
+            safe_print(f'[{name}] mission failed, we\'ll get them next time')
+            return None
+
+        old_path = Path(path)
+        new_path = old_path.with_suffix(f'.{img_format}').resolve()
+        old_path = old_path.resolve()
+
+        args = None
+        stderr = None
+        if img_format == 'avif':
+            quality = 80 - (iteration * 10)
+            args = ['avifenc', '-q', str(quality), old_path, new_path]
+
+        elif img_format == 'jxl':
+            distance = 4 + iteration
+            args = ['cjxl', '--lossless_jpeg=0', '-d', str(distance), old_path, new_path]
+            stderr = subprocess.DEVNULL
+
+        if iteration != 0:
+            safe_print(f'[{name}] retrying with args [{' '.join(args[:-2])}]')
+
+        encode_result = subprocess.run(args, stdout=subprocess.DEVNULL, stderr=stderr)
+        if encode_result.returncode != 0:
+            # handle the error
+            return None
+
+        new_size = os.path.getsize(new_path)
+        if new_size < old_size:
+            break
+
+        safe_print(f'[{name}] new size ({human_size(new_size, False)}) is bigger than old size ({human_size(old_size, False)})')
+        iteration += 1
 
     os.remove(path)
-
-    return new_path
+    return [new_path, img_format, old_size, new_size]
 
 def process_one(dir_path, index, total_count, name):
     files = [f.path for f in os.scandir(dir_path) if not f.is_dir()]
@@ -56,29 +89,28 @@ def process_one(dir_path, index, total_count, name):
         return False
 
     path = [a for a in files if os.path.basename(a) == image_name][0]
-    size = os.path.getsize(path)
 
-    new_path = convert(path)
-    if new_path == None:
+    result = convert(path, name)
+    if result == None:
         safe_print(f'[{name}] error during conversion, skipping')
 
         return False
 
-    new_size = os.path.getsize(new_path)
+    new_path, img_format, old_size, new_size = result
 
-    metadata['ext'] = 'avif'
+    metadata['ext'] = img_format
     metadata['size'] = new_size
     with open(metadata_file, 'w') as file:
         json.dump(metadata, file)
 
-    reduction = (1 - (new_size / size)) * -100
+    reduction = (1 - (new_size / old_size)) * -100
     index += 1
     progress = (index / total_count) * 100
-    readable_size = human_size(size, False)
+    readable_old_size = human_size(old_size, False)
     readable_new_size = human_size(new_size, False)
 
     to_print = f"[{name}] converted.\t" \
-    f"old size: {readable_size},\t" \
+    f"old size: {readable_old_size},\t" \
     f"new size: {readable_new_size},\t" \
     f"reduction: {reduction:.2f}%,\t" \
     f"progress: {index}/{total_count} {progress:.2f}%"
