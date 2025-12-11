@@ -6,16 +6,16 @@ import threading
 import queue
 import time
 
-source_dir = '/Volumes/Athena/river-lib/small_lib copy'
+source_dir = '/Volumes/Athena/river-lib/small_lib_avif_73'
 
 worker_count = 8
 encoder_thread_count = None
 
 # optimal for jxl: w8 e4
 
-default_img_format = 'jxl'
+default_img_format = 'avif'
 base_jxl_distance = 2
-base_avif_quality = 80
+base_avif_quality = 73
 
 converted_extensions = ['avif', 'jxl', 'webp']
 valid_extensions = ['png', 'jpg', 'jpeg', 'gif']
