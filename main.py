@@ -2,11 +2,16 @@ import os
 import json
 import subprocess
 from pathlib import Path
+import threading
+import queue
 import time
 
-source_dir = '/Volumes/Athena/river-lib/tiny_lib copy'
+source_dir = '/Volumes/Athena/river-lib/small_lib copy'
 converted_extensions = ['avif', 'jxl', 'webp']
 valid_extensions = ['png', 'jpg', 'jpeg', 'gif']
+
+converted_lock = threading.Lock()
+print_lock = threading.Lock()
 
 def get_size(dir_path):
     # -ks for size in kilobytes
@@ -26,7 +31,7 @@ def convert(path):
     subprocess.run(['rm', path], stdout = subprocess.DEVNULL)
     return new_path
 
-def process_one(dir_path, index, total_count):
+def process_one(dir_path, index, total_count, name):
     files = [f.path for f in os.scandir(dir_path) if not f.is_dir()]
     metadata_file = [a for a in files if os.path.basename(a) == 'metadata.json'][0]
     with open(metadata_file, 'r') as file:
@@ -34,14 +39,19 @@ def process_one(dir_path, index, total_count):
 
     extension = metadata['ext']
     image_name = metadata['name'] + '.' + extension
-    print(f'processing {image_name}')
+    with print_lock:
+        print(f'[{name}] processing {image_name}')
 
     if extension in converted_extensions:
-        print(f'{extension} is already converted, skipping')
+        with print_lock:
+            print(f'[{name}] {extension} is already converted, skipping')
+
         return False
 
     if extension not in valid_extensions:
-        print(f'{extension} is not a valid extension, skipping')
+        with print_lock:
+            print(f'[{name}] {extension} is not a valid extension, skipping')
+
         return False
 
     path = [a for a in files if os.path.basename(a) == image_name][0]
@@ -49,7 +59,9 @@ def process_one(dir_path, index, total_count):
 
     new_path = convert(path)
     if new_path == None:
-        print('error during conversion, skipping')
+        with print_lock:
+            print(f'[{name}] error during conversion, skipping')
+
         return False
 
     new_size = os.path.getsize(new_path)
@@ -62,9 +74,44 @@ def process_one(dir_path, index, total_count):
     reduction = (1 - (new_size / size)) * -100
     index += 1
     progress = (index / total_count) * 100
-    print(f'converted.\told size: {size},\tnew size: {new_size},\treduction: {reduction:.2f}%,\tprogress: {index}/{total_count} {progress:.2f}%')
+    readable_size = human_size(size, False)
+    readable_new_size = human_size(new_size, False)
+    with print_lock:
+        print(f'[{name}] converted.\told size: {readable_size},\tnew size: {readable_new_size},\treduction: {reduction:.2f}%,\tprogress: {index}/{total_count} {progress:.2f}%')
 
     return True
+
+def worker(name, queue, total_count):
+    while True:
+        index, image_dir = queue.get()
+
+        did_convert = process_one(image_dir, index, total_count, name)
+        if did_convert:
+            with converted_lock:
+                global converted_count
+                converted_count += 1
+
+        queue.task_done()
+
+def start_work(image_dirs):
+    q = queue.Queue()
+    total_count = len(image_dirs)
+
+    worker_count = 4
+    workers = []
+    for i in range(worker_count):
+        workerThread = threading.Thread(target=worker, args=[f'Worker {i + 1}', q, total_count], daemon=True)
+        workers.append(workerThread)
+        workerThread.start()
+
+    for index, image_dir in enumerate(image_dirs):
+        q.put([index, image_dir])
+
+    q.join()
+    print('all work completed')
+
+def human_size(size, source_is_kilobytes):
+    return f'{size / 1024:.2f}' + ('mb' if source_is_kilobytes else 'kb')
 
 def main():
     start = time.time()
@@ -73,11 +120,10 @@ def main():
     image_dirs = [f.path for f in os.scandir(source_dir) if f.is_dir()]
 
     total_count = len(image_dirs)
+    global converted_count
     converted_count = 0
-    for index, image_dir in enumerate(image_dirs):
-        did_convert = process_one(image_dir, index, total_count)
-        if did_convert:
-            converted_count += 1
+
+    start_work(image_dirs)
 
     new_size = get_size(source_dir)
     reduction = (1 - (new_size / size)) * -100
@@ -85,8 +131,8 @@ def main():
     end = time.time()
     elapsed = end - start
 
-    print(f'converted {converted_count} files')
-    print(f'old size: {size / 1024:.2f}mb, new size: {new_size / 1024:.2f}mb, reduction: {reduction:.2f}%')
+    print(f'converted {converted_count} files out of {total_count}')
+    print(f'old size: {human_size(size, True)}, new size: {human_size(new_size, True)}, reduction: {reduction:.2f}%')
     print(f'finished in {elapsed:.2f}s, speed: {(total_count / elapsed):.2f} files/s')
 
 main()
