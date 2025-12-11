@@ -7,10 +7,10 @@ import queue
 import time
 import random
 
-source_dir = '/Volumes/Athena/river-lib/small_lib'
+source_dir = '/Volumes/Athena/river-lib/riverLibrary.library/images'
 output_dir = '/Volumes/Athena/river-lib/compare_output'
 
-image_count = 10
+image_count = 20
 encoder_thread_count = None
 
 converted_extensions = ['avif', 'jxl', 'webp']
@@ -62,7 +62,15 @@ def convert_many(path):
 
     old_path = Path(path)
     dir_name = shortened(old_path.stem)
-    image_dir = os.path.join(output_dir, dir_name)
+
+    image_dir = None
+    i = 0
+    while True:
+        image_dir = os.path.join(output_dir, dir_name)
+        if not os.path.exists(image_dir):
+            break
+        dir_name = f'{dir_name}{i}'
+        i += 1
 
     result = subprocess.run(['mkdir', image_dir], stdout=subprocess.DEVNULL)
 
