@@ -6,18 +6,18 @@ import threading
 import queue
 import time
 
-source_dir = '/Volumes/Athena/river-lib/small_lib_avif_73'
+source_dir = '/Volumes/Athena/river-lib/small_lib_jxl_85'
 
 worker_count = 8
 encoder_thread_count = None
 
 # optimal for jxl: w8 e4
 
-default_img_format = 'avif'
+default_img_format = 'jxl'
 jxl_use_quality = True
-jxl_quality = 80
+jxl_quality = 85
 jxl_distance = 2
-avif_quality = 80
+avif_quality = 85
 
 converted_extensions = ['avif', 'jxl', 'webp']
 valid_extensions = ['png', 'jpg', 'jpeg', 'gif']
@@ -82,7 +82,7 @@ def convert(path, name):
     while True:
         if iteration == max_iterations:
             safe_print(f'[{name}] mission failed, we\'ll get them next time (i tried {iteration} time{'' if iteration == 1 else 's'})')
-            return None
+            return 'compression_fail'
 
         old_path = Path(path)
         new_path = old_path.with_suffix(f'.{img_format}').resolve()
@@ -135,13 +135,21 @@ def process_one(dir_path, index, total_count, name):
 
         return False
 
-    path = [a for a in files if os.path.basename(a) == image_name][0]
+    paths = [a for a in files if os.path.basename(a) == image_name]
+    if not paths:
+        safe_print(f'[{name}] could not find the image, skipping')
+        return False
+
+    path = paths[0]
 
     result = convert(path, name)
-    if result == None:
-        safe_print(f'[{name}] error during conversion, skipping')
-
-        return False
+    match result:
+        case 'compression_fail':
+            safe_print(f'[{name}] new size was bigger, skipping')
+            return False
+        case None:
+            safe_print(f'[{name}] error during conversion, skipping')
+            return False
 
     new_path, img_format, old_size, new_size = result
 
