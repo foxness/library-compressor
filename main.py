@@ -75,6 +75,10 @@ def convert(path, name):
     img_format = default_img_format
     old_size = os.path.getsize(path)
 
+    old_path = Path(path)
+    new_path = old_path.with_suffix(f'.{img_format}').resolve()
+    old_path = old_path.resolve()
+
     new_size = None
     iteration = 0
     max_iterations = 1
@@ -82,11 +86,8 @@ def convert(path, name):
     while True:
         if iteration == max_iterations:
             safe_print(f'[{name}] mission failed, we\'ll get them next time (i tried {iteration} time{'' if iteration == 1 else 's'})')
+            os.remove(new_path)
             return 'compression_fail'
-
-        old_path = Path(path)
-        new_path = old_path.with_suffix(f'.{img_format}').resolve()
-        old_path = old_path.resolve()
 
         args = None
         stderr = None
@@ -102,7 +103,9 @@ def convert(path, name):
 
         encode_result = subprocess.run(args, stdout=subprocess.DEVNULL, stderr=stderr)
         if encode_result.returncode != 0:
-            # handle the error
+            if os.path.isfile(new_path):
+                os.remove(new_path)
+
             return None
 
         new_size = os.path.getsize(new_path)
