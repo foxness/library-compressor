@@ -14,8 +14,10 @@ encoder_thread_count = None
 # optimal for jxl: w8 e4
 
 default_img_format = 'avif'
-base_jxl_distance = 2
-base_avif_quality = 73
+jxl_use_quality = True
+jxl_quality = 80
+jxl_distance = 2
+avif_quality = 80
 
 converted_extensions = ['avif', 'jxl', 'webp']
 valid_extensions = ['png', 'jpg', 'jpeg', 'gif']
@@ -27,20 +29,27 @@ log_dir = '/Volumes/Athena/river-lib/'
 conversion_log = ""
 
 def get_log_name():
-    q = base_jxl_distance if default_img_format == 'jxl' else base_avif_quality
+    q = (jxl_quality if jxl_use_quality else jxl_distance) if default_img_format == 'jxl' else avif_quality
     e = f'_e{encoder_thread_count}' if encoder_thread_count != None else ''
     return f'log_{default_img_format}_{q}_w{worker_count}{e}.log'
 
 def get_jxl_base_args(iteration):
-    distance = base_jxl_distance + iteration
-    args = ['cjxl', '--lossless_jpeg=0', '-d', str(distance)]
+    args = ['cjxl', '--lossless_jpeg=0']
+
+    if jxl_use_quality:
+        quality = jxl_quality - (iteration * 10)
+        args += ['-q', str(quality)]
+    else:
+        distance = jxl_distance + iteration
+        args += ['-d', str(distance)]
+
     if encoder_thread_count != None:
         args += [f'--num_threads={encoder_thread_count}']
 
     return args
 
 def get_avif_base_args(iteration):
-    quality = base_avif_quality - (iteration * 10)
+    quality = avif_quality - (iteration * 10)
     args = ['avifenc', '-q', str(quality)]
     if encoder_thread_count != None:
         args += ['-j', str(encoder_thread_count)]
@@ -52,6 +61,15 @@ def get_size(dir_path):
     # -ms for size in megabytes
     result = subprocess.run(['du', '-ks', dir_path], capture_output=True, text=True)
     return int(result.stdout.split('\t')[0])
+
+def human_size(size, source_is_kilobytes):
+    return f'{size / 1024:.2f}' + ('mb' if source_is_kilobytes else 'kb')
+
+def safe_print(*a, **b):
+    with print_log_lock:
+        global conversion_log
+        conversion_log += f'{a[0]}\n'
+        print(*a, **b)
 
 def convert(path, name):
     img_format = default_img_format
@@ -159,12 +177,6 @@ def work(name, queue, total_count):
 
         queue.task_done()
 
-def safe_print(*a, **b):
-    with print_log_lock:
-        global conversion_log
-        conversion_log += f'{a[0]}\n'
-        print(*a, **b)
-
 def start_work(image_dirs):
     q = queue.Queue()
     total_count = len(image_dirs)
@@ -180,9 +192,6 @@ def start_work(image_dirs):
 
     q.join()
     safe_print('all work completed')
-
-def human_size(size, source_is_kilobytes):
-    return f'{size / 1024:.2f}' + ('mb' if source_is_kilobytes else 'kb')
 
 def main():
     start = time.time()
