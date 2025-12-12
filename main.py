@@ -6,18 +6,18 @@ import threading
 import queue
 import time
 
-source_dir = '/Volumes/Athena/river-lib/small_lib_jxl_85'
+source_dir = '/Volumes/Athena/river-lib/small_lib_jxl_lossless'
+
+default_img_format = 'jxl'
+jxl_use_lossless_jpg = True
+jxl_measure_is_quality = True
+jxl_quality = 90
+jxl_distance = 2
+avif_quality = 80
 
 worker_count = 8
 encoder_thread_count = None
-
 # optimal for jxl: w8 e4
-
-default_img_format = 'jxl'
-jxl_use_quality = True
-jxl_quality = 85
-jxl_distance = 2
-avif_quality = 85
 
 converted_extensions = ['avif', 'jxl', 'webp']
 valid_extensions = ['png', 'jpg', 'jpeg', 'gif']
@@ -29,19 +29,30 @@ log_dir = '/Volumes/Athena/river-lib/'
 conversion_log = ""
 
 def get_log_name():
-    q = (jxl_quality if jxl_use_quality else jxl_distance) if default_img_format == 'jxl' else avif_quality
+    q = (jxl_quality if jxl_measure_is_quality else jxl_distance) if default_img_format == 'jxl' else avif_quality
+    if default_img_format == 'jxl' and jxl_use_lossless_jpg:
+        q = f'{q}_lossless'
+
     e = f'_e{encoder_thread_count}' if encoder_thread_count != None else ''
     return f'log_{default_img_format}_{q}_w{worker_count}{e}.log'
 
-def get_jxl_base_args(iteration):
-    args = ['cjxl', '--lossless_jpeg=0']
+def get_jxl_base_args(source_format, iteration):
+    args = ['cjxl']
 
-    if jxl_use_quality:
-        quality = jxl_quality - (iteration * 10)
-        args += ['-q', str(quality)]
-    else:
-        distance = jxl_distance + iteration
-        args += ['-d', str(distance)]
+    add_quality = True
+    match source_format:
+        case 'jpg' | 'jpeg':
+            args += [f'--lossless_jpeg={1 if jxl_use_lossless_jpg else 0}']
+            if jxl_use_lossless_jpg:
+                add_quality = False
+
+    if add_quality:
+        if jxl_measure_is_quality:
+            quality = jxl_quality - (iteration * 10)
+            args += ['-q', str(quality)]
+        else:
+            distance = jxl_distance + iteration
+            args += ['-d', str(distance)]
 
     if encoder_thread_count != None:
         args += [f'--num_threads={encoder_thread_count}']
@@ -76,6 +87,7 @@ def convert(path, name):
     old_size = os.path.getsize(path)
 
     old_path = Path(path)
+    source_format = old_path.suffix.lower()[1:]
     new_path = old_path.with_suffix(f'.{img_format}').resolve()
     old_path = old_path.resolve()
 
@@ -92,11 +104,13 @@ def convert(path, name):
         args = None
         stderr = None
         if img_format == 'avif':
-            args = get_avif_base_args(iteration) + [old_path, new_path]
+            args = get_avif_base_args(iteration)
 
         elif img_format == 'jxl':
-            args = get_jxl_base_args(iteration) + [old_path, new_path]
+            args = get_jxl_base_args(source_format, iteration)
             stderr = subprocess.DEVNULL
+
+        args += [old_path, new_path]
 
         if iteration != 0:
             safe_print(f'[{name}] retrying with args [{' '.join(args[:-2])}]')
@@ -223,9 +237,9 @@ def main():
     end = time.time()
     elapsed = end - start
 
-    safe_print(f'converted {converted_count} files out of {total_count}')
+    safe_print(f'finished in {elapsed:.2f}s, {(total_count / elapsed):.2f} files/s')
+    safe_print(f'converted {converted_count} files out of {total_count} ({(converted_count / total_count):.2%})')
     safe_print(f'old size: {human_size(size, True)}, new size: {human_size(new_size, True)}, reduction: {reduction:.2f}%')
-    safe_print(f'finished in {elapsed:.2f}s, speed: {(total_count / elapsed):.2f} files/s')
 
     log_path = log_dir + get_log_name()
     with open(log_path, 'w') as file:
