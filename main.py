@@ -6,10 +6,9 @@ import threading
 import queue
 import time
 
-source_dir = '/Volumes/Athena/river-lib/small_lib_jxl_lossless'
+source_dir = '/Volumes/Athena/river-lib/small_lib_jxl_lossless_fight'
 
 default_img_format = 'jxl'
-jxl_use_lossless_jpg = True
 jxl_measure_is_quality = True
 jxl_quality = 90
 jxl_distance = 2
@@ -30,20 +29,17 @@ conversion_log = ""
 
 def get_log_name():
     q = (jxl_quality if jxl_measure_is_quality else jxl_distance) if default_img_format == 'jxl' else avif_quality
-    if default_img_format == 'jxl' and jxl_use_lossless_jpg:
-        q = f'{q}_lossless'
-
     e = f'_e{encoder_thread_count}' if encoder_thread_count != None else ''
     return f'log_{default_img_format}_{q}_w{worker_count}{e}.log'
 
-def get_jxl_base_args(source_format, iteration):
+def get_jxl_base_args(source_format, use_lossless_jpg, iteration):
     args = ['cjxl']
 
     add_quality = True
     match source_format:
         case 'jpg' | 'jpeg':
-            args += [f'--lossless_jpeg={1 if jxl_use_lossless_jpg else 0}']
-            if jxl_use_lossless_jpg:
+            args += [f'--lossless_jpeg={1 if use_lossless_jpg else 0}']
+            if use_lossless_jpg:
                 add_quality = False
 
     if add_quality:
@@ -82,6 +78,77 @@ def safe_print(*a, **b):
         conversion_log += f'{a[0]}\n'
         print(*a, **b)
 
+def jxl_fight(jpg_path, name):
+    old_path = Path(jpg_path)
+
+    lossy_name = f'{old_path.stem}_lossy.jxl'
+    lossless_name = f'{old_path.stem}_lossless.jxl'
+    final_name = f'{old_path.stem}.jxl'
+
+    lossy_path = old_path.with_name(lossy_name).resolve()
+    lossless_path = old_path.with_name(lossless_name).resolve()
+    final_path = old_path.with_name(final_name).resolve()
+
+    lossy_args = get_jxl_base_args('jpg', False, 0)
+    lossless_args = get_jxl_base_args('jpg', True, 0)
+
+    lossy_args += [jpg_path, lossy_path]
+    lossless_args += [jpg_path, lossless_path]
+
+    lossy_size = None
+    lossless_size = None
+
+    lossy_result = subprocess.run(lossy_args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    lossy_fail = lossy_result.returncode != 0
+    if lossy_fail:
+        if os.path.isfile(lossy_path):
+            os.remove(lossy_path)
+    else:
+        lossy_size = os.path.getsize(lossy_path)
+
+    lossless_result = subprocess.run(lossless_args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    lossless_fail = lossless_result.returncode != 0
+    if lossless_fail:
+        if os.path.isfile(lossless_path):
+            os.remove(lossless_path)
+    else:
+        lossless_size = os.path.getsize(lossless_path)
+
+    if lossy_fail and lossless_fail:
+        safe_print(f'[{name}] this is an epic fail, aborting')
+        return None
+    elif lossy_fail and not lossless_fail:
+        safe_print(f'[{name}] lossless won because lossy errored')
+        os.rename(lossless_path, final_path)
+        return [final_path, lossless_size]
+    elif lossless_fail and not lossy_fail:
+        safe_print(f'[{name}] lossy won because lossless errored')
+        os.rename(lossy_path, final_path)
+        return [final_path, lossy_size]
+
+    winner = 'lossless'
+    winner_path = lossless_path
+    winner_size = lossless_size
+    loser_path = lossy_path
+    loser_size = lossy_size
+
+    if lossy_size < lossless_size:
+        winner = 'lossy'
+        winner_path = lossy_path
+        winner_size = lossy_size
+        loser_path = lossless_path
+        loser_size = lossless_size
+
+    readable_winner_size = human_size(winner_size, False)
+    readable_loser_size = human_size(loser_size, False)
+
+    difference = (1 - (winner_size / loser_size)) * 100
+    safe_print(f'[{name}] {winner} won because it was {difference:.2f}% smaller [{readable_winner_size} vs {readable_loser_size}]')
+
+    os.remove(loser_path)
+    os.rename(winner_path, final_path)
+    return [final_path, winner_size]
+
 def convert(path, name):
     img_format = default_img_format
     old_size = os.path.getsize(path)
@@ -89,7 +156,6 @@ def convert(path, name):
     old_path = Path(path)
     source_format = old_path.suffix.lower()[1:]
     new_path = old_path.with_suffix(f'.{img_format}').resolve()
-    old_path = old_path.resolve()
 
     new_size = None
     iteration = 0
@@ -101,28 +167,36 @@ def convert(path, name):
             os.remove(new_path)
             return 'compression_fail'
 
-        args = None
-        stderr = None
-        if img_format == 'avif':
-            args = get_avif_base_args(iteration)
+        if (source_format == 'jpg' or source_format == 'jpeg') and img_format == 'jxl' and iteration == 0:
+            jxl_fight_result = jxl_fight(path, name)
+            if jxl_fight_result == None:
+                return None
 
-        elif img_format == 'jxl':
-            args = get_jxl_base_args(source_format, iteration)
-            stderr = subprocess.DEVNULL
+            new_path, new_size = jxl_fight_result
+        else:
+            args = None
+            stderr = None
+            if img_format == 'avif':
+                args = get_avif_base_args(iteration)
 
-        args += [old_path, new_path]
+            elif img_format == 'jxl':
+                args = get_jxl_base_args(source_format, False, iteration)
+                stderr = subprocess.DEVNULL
 
-        if iteration != 0:
-            safe_print(f'[{name}] retrying with args [{' '.join(args[:-2])}]')
+            args += [path, new_path]
 
-        encode_result = subprocess.run(args, stdout=subprocess.DEVNULL, stderr=stderr)
-        if encode_result.returncode != 0:
-            if os.path.isfile(new_path):
-                os.remove(new_path)
+            if iteration != 0:
+                safe_print(f'[{name}] retrying with args [{' '.join(args[:-2])}]')
 
-            return None
+            encode_result = subprocess.run(args, stdout=subprocess.DEVNULL, stderr=stderr)
+            if encode_result.returncode != 0:
+                if os.path.isfile(new_path):
+                    os.remove(new_path)
 
-        new_size = os.path.getsize(new_path)
+                return None
+
+            new_size = os.path.getsize(new_path)
+
         if new_size < old_size:
             break
 
