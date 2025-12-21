@@ -6,17 +6,23 @@ import threading
 import queue
 import time
 import random
+import string
 
-source_dir = '/Volumes/Athena/river-lib/riverLibrary.library/images'
+source_dir = '/Volumes/Athena/river-lib/huge_png_lib'
 output_dir = '/Volumes/Athena/river-lib/compare_output'
 
-image_count = 20
+image_count = 40
+iteration_count = 2
 encoder_thread_count = None
 
 converted_extensions = ['avif', 'jxl', 'webp']
 valid_extensions = ['png', 'jpg', 'jpeg', 'gif']
 
 print_lock = threading.Lock()
+
+def random_word(length):
+   letters = string.ascii_lowercase
+   return ''.join(random.choice(letters) for i in range(length))
 
 def get_jxl_base_args(quality):
     args = ['cjxl', '--lossless_jpeg=0', '-q', str(quality)]
@@ -32,9 +38,9 @@ def get_avif_base_args(quality):
 
     return args
 
-def convert(path, output_dir, img_format, quality):
+def convert(path, output_dir, prefix, img_format, quality):
     old_path = Path(path)
-    new_name = f'{shortened(old_path.stem)}_{img_format}{quality}.{img_format}'
+    new_name = f'{prefix}_{quality}{img_format}.{img_format}'
     new_path = os.path.join(output_dir, new_name)
 
     args = None
@@ -58,31 +64,27 @@ def shortened(name):
     return name if len(name) <= max_len else name[:max_len]
 
 def convert_many(path):
-    iteration_count = 7
-
     old_path = Path(path)
-    dir_name = shortened(old_path.stem)
+    prefix = f'{shortened(old_path.stem)}_{random_word(10)}'
+    # result_prefix = prefix
 
-    image_dir = None
-    i = 0
-    while True:
-        image_dir = os.path.join(output_dir, dir_name)
-        if not os.path.exists(image_dir):
-            break
-        dir_name = f'{dir_name}{i}'
-        i += 1
+    # i = 0
+    # while True:
+    #     image_dir = os.path.join(output_dir, dir_name)
+    #     if not os.path.exists(image_dir):
+    #         break
+    #     dir_name = f'{orig_dir_name}{i}'
+    #     i += 1
 
-    result = subprocess.run(['mkdir', image_dir], stdout=subprocess.DEVNULL)
-
-    new_orig_name = f'orig{old_path.suffix}'
-    new_orig_path = os.path.join(image_dir, new_orig_name)
+    new_orig_name = f'{prefix}_orig{old_path.suffix}'
+    new_orig_path = os.path.join(output_dir, new_orig_name)
 
     result = subprocess.run(['cp', path, new_orig_path], stdout=subprocess.DEVNULL)
     for img_format in ['jxl', 'avif']:
         for i in range(iteration_count):
-            quality = 90 - i * 5
-            convert(path, image_dir, img_format, quality)
-            print(f'{dir_name} {img_format}{quality}')
+            quality = 85 - i * 20
+            convert(path, output_dir, prefix, img_format, quality)
+            print(f'{prefix} {img_format}{quality}')
 
 def process_one(dir_path):
     files = [f.path for f in os.scandir(dir_path) if not f.is_dir()]
