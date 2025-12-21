@@ -9,12 +9,14 @@ import time
 source_dir = '/Volumes/Athena/river-lib/small_lib_90'
 
 force_img_format = None
+master_quality = 85
 
 jxl_fighting_enabled = True # pick best between lossy and lossless
 jxl_measure_is_quality = True
-jxl_quality = 90
+jxl_quality = master_quality if master_quality != None else 85
 jxl_distance = 2
-avif_quality = 90
+
+avif_quality = master_quality if master_quality != None else 85
 
 worker_count = 8
 encoder_thread_count = None
@@ -25,10 +27,13 @@ valid_extensions = ['png', 'jpg', 'jpeg', 'gif']
 
 converted_lock = threading.Lock()
 print_log_lock = threading.Lock()
-win_count_lock = threading.Lock()
+jxl_win_count_lock = threading.Lock()
+format_win_count_lock = threading.Lock()
 
 jxl_fight_count = 0
 jxl_lossless_win_count = 0
+format_fight_count = 0
+format_jxl_win_count = 0
 
 log_dir = '/Volumes/Athena/river-lib/'
 conversion_log = ""
@@ -87,6 +92,7 @@ def safe_print(*a, **b):
 
 def jxl_fight(jpg_path, name):
     global jxl_fight_count, jxl_lossless_win_count
+
     old_path = Path(jpg_path)
 
     lossy_name = f'{old_path.stem}_lossy.jxl'
@@ -126,14 +132,14 @@ def jxl_fight(jpg_path, name):
         safe_print(f'[{name}] this is an epic fail, aborting')
         return None
     elif lossy_fail and not lossless_fail:
-        with win_count_lock:
+        with jxl_win_count_lock:
             jxl_fight_count += 1
             jxl_lossless_win_count += 1
         safe_print(f'[{name}] lossless won because lossy errored')
         os.rename(lossless_path, final_path)
         return [final_path, lossless_size]
     elif lossless_fail and not lossy_fail:
-        with win_count_lock:
+        with jxl_win_count_lock:
             jxl_fight_count += 1
         safe_print(f'[{name}] lossy won because lossless errored')
         os.rename(lossy_path, final_path)
@@ -146,23 +152,22 @@ def jxl_fight(jpg_path, name):
     loser_size = lossy_size
 
     if lossy_size < lossless_size:
-        with win_count_lock:
-            jxl_fight_count += 1
         winner = 'lossy'
         winner_path = lossy_path
         winner_size = lossy_size
         loser_path = lossless_path
         loser_size = lossless_size
-    else:
-        with win_count_lock:
-            jxl_fight_count += 1
-            jxl_lossless_win_count += 1
 
     readable_winner_size = human_size(winner_size, False)
     readable_loser_size = human_size(loser_size, False)
 
     difference = (1 - (winner_size / loser_size)) * 100
     safe_print(f'[{name}] {winner} won because it was {difference:.2f}% smaller [{readable_winner_size} vs {readable_loser_size}]')
+
+    with jxl_win_count_lock:
+        jxl_fight_count += 1
+        if winner == 'lossless':
+            jxl_lossless_win_count += 1
 
     os.remove(loser_path)
     os.rename(winner_path, final_path)
@@ -200,9 +205,7 @@ def convert_to_jxl(path, name):
 def convert_to_avif(path, name):
     img_format = 'avif'
 
-    old_path = Path(path)
-    source_format = old_path.suffix.lower()[1:]
-    new_path = old_path.with_suffix(f'.{img_format}').resolve()
+    new_path = Path(path).with_suffix(f'.{img_format}').resolve()
     new_size = None
 
     args = get_avif_base_args(0)
@@ -219,6 +222,8 @@ def convert_to_avif(path, name):
     return [new_path, new_size]
 
 def convert_to_best(path, name):
+    global format_fight_count, format_jxl_win_count
+
     old_size = os.path.getsize(path)
     win_type = 'forced' if force_img_format != None else None
 
@@ -279,6 +284,12 @@ def convert_to_best(path, name):
 
     if win_type == 'fair':
         os.remove(loser_path)
+
+    if win_type != 'forced':
+        with format_win_count_lock:
+            format_fight_count += 1
+            if winner == 'jxl':
+                format_jxl_win_count += 1
 
     readable_old_size = human_size(old_size, False)
     readable_winner_size = human_size(winner_size, False)
@@ -403,14 +414,17 @@ def main():
     end = time.time()
     elapsed = end - start
 
-    safe_print(f'finished in {elapsed:.2f}s, {(total_count / elapsed):.2f} files/s')
-
     new_size = get_size(source_dir)
     reduction = (1 - (new_size / size)) * -100
 
     safe_print(f'converted {converted_count} files out of {total_count} ({(converted_count / total_count):.2%})')
     safe_print(f'old size: {human_size(size, True)}, new size: {human_size(new_size, True)}, reduction: {reduction:.2f}%')
+
+    if force_img_format == None:
+        safe_print(f'jxl wins: {(format_jxl_win_count / format_fight_count):.2%} ({format_jxl_win_count}/{format_fight_count})')
+
     safe_print(f'jxl lossless wins: {(jxl_lossless_win_count / jxl_fight_count):.2%} ({jxl_lossless_win_count}/{jxl_fight_count})')
+    safe_print(f'\nfinished in {elapsed:.2f}s, {(total_count / elapsed):.2f} files/s')
 
     log_path = log_dir + get_log_name()
     with open(log_path, 'w') as file:
