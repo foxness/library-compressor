@@ -6,17 +6,17 @@ import threading
 import queue
 import time
 
-source_dir = '/Volumes/Athena/river-lib/small_lib_90'
+source_dir = '/Volumes/Athena/river-lib/small_lib_jxl85_avif80_nojxlfight'
 
 force_img_format = None
-master_quality = 85
+master_quality = None
 
-jxl_fighting_enabled = True # pick best between lossy and lossless
+jxl_fighting_enabled = False # pick best between lossy and lossless
 jxl_measure_is_quality = True
 jxl_quality = master_quality if master_quality != None else 85
 jxl_distance = 2
 
-avif_quality = master_quality if master_quality != None else 85
+avif_quality = master_quality if master_quality != None else 80
 
 worker_count = 8
 encoder_thread_count = None
@@ -420,10 +420,12 @@ def main():
     safe_print(f'converted {converted_count} files out of {total_count} ({(converted_count / total_count):.2%})')
     safe_print(f'old size: {human_size(size, True)}, new size: {human_size(new_size, True)}, reduction: {reduction:.2f}%')
 
-    if force_img_format == None:
+    if force_img_format == None and format_fight_count != 0:
         safe_print(f'jxl wins: {(format_jxl_win_count / format_fight_count):.2%} ({format_jxl_win_count}/{format_fight_count})')
 
-    safe_print(f'jxl lossless wins: {(jxl_lossless_win_count / jxl_fight_count):.2%} ({jxl_lossless_win_count}/{jxl_fight_count})')
+    if jxl_fighting_enabled and jxl_fight_count != 0:
+        safe_print(f'jxl lossless wins: {(jxl_lossless_win_count / jxl_fight_count):.2%} ({jxl_lossless_win_count}/{jxl_fight_count})')
+
     safe_print(f'\nfinished in {elapsed:.2f}s, {(total_count / elapsed):.2f} files/s')
 
     log_path = log_dir + get_log_name()
