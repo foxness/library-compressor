@@ -6,15 +6,15 @@ import threading
 import queue
 import time
 
-source_dir = '/Volumes/Athena/river-lib/small_lib_jxl_90_lossless_fight'
+source_dir = '/Volumes/Athena/river-lib/small_lib_90'
 
-default_img_format = 'jxl'
+force_img_format = None
 
-jxl_fighting_enabled = True
+jxl_fighting_enabled = True # pick best between lossy and lossless
 jxl_measure_is_quality = True
 jxl_quality = 90
 jxl_distance = 2
-avif_quality = 80
+avif_quality = 90
 
 worker_count = 8
 encoder_thread_count = None
@@ -34,9 +34,10 @@ log_dir = '/Volumes/Athena/river-lib/'
 conversion_log = ""
 
 def get_log_name():
-    q = (jxl_quality if jxl_measure_is_quality else jxl_distance) if default_img_format == 'jxl' else avif_quality
+    q = (jxl_quality if jxl_measure_is_quality else jxl_distance) if force_img_format == 'jxl' else avif_quality
     e = f'_e{encoder_thread_count}' if encoder_thread_count != None else ''
-    return f'log_{default_img_format}_{q}_w{worker_count}{e}.log'
+    f = f'_{force_img_format}' if force_img_format != None else ''
+    return f'log{f}_{q}_w{worker_count}{e}.log'
 
 def get_jxl_base_args(source_format, use_lossless_jpg, iteration):
     args = ['cjxl']
@@ -167,66 +168,138 @@ def jxl_fight(jpg_path, name):
     os.rename(winner_path, final_path)
     return [final_path, winner_size]
 
-def convert(path, name):
-    img_format = default_img_format
-    old_size = os.path.getsize(path)
+def convert_to_jxl(path, name):
+    img_format = 'jxl'
 
     old_path = Path(path)
     source_format = old_path.suffix.lower()[1:]
     new_path = old_path.with_suffix(f'.{img_format}').resolve()
-
     new_size = None
-    iteration = 0
-    max_iterations = 1
 
-    while True:
-        if iteration == max_iterations:
-            safe_print(f'[{name}] mission failed, we\'ll get them next time (i tried {iteration} time{'' if iteration == 1 else 's'})')
+    if jxl_fighting_enabled and (source_format == 'jpg' or source_format == 'jpeg'):
+        jxl_fight_result = jxl_fight(path, name)
+        if jxl_fight_result == None:
+            return None
+
+        new_path, new_size = jxl_fight_result
+    else:
+        args = get_jxl_base_args(source_format, False, 0)
+        args += [path, new_path]
+
+        encode_result = subprocess.run(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if encode_result.returncode != 0:
+            if os.path.isfile(new_path):
+                os.remove(new_path)
+
+            return None
+
+        new_size = os.path.getsize(new_path)
+
+    return [new_path, new_size]
+
+def convert_to_avif(path, name):
+    img_format = 'avif'
+
+    old_path = Path(path)
+    source_format = old_path.suffix.lower()[1:]
+    new_path = old_path.with_suffix(f'.{img_format}').resolve()
+    new_size = None
+
+    args = get_avif_base_args(0)
+    args += [path, new_path]
+
+    encode_result = subprocess.run(args, stdout=subprocess.DEVNULL)
+    if encode_result.returncode != 0:
+        if os.path.isfile(new_path):
             os.remove(new_path)
-            return 'compression_fail'
 
-        if jxl_fighting_enabled and \
-            (source_format == 'jpg' or source_format == 'jpeg') and \
-            img_format == 'jxl' and \
-            iteration == 0:
+        return None
 
-            jxl_fight_result = jxl_fight(path, name)
-            if jxl_fight_result == None:
-                return None
+    new_size = os.path.getsize(new_path)
+    return [new_path, new_size]
 
-            new_path, new_size = jxl_fight_result
-        else:
-            args = None
-            stderr = None
-            if img_format == 'avif':
-                args = get_avif_base_args(iteration)
+def convert_to_best(path, name):
+    old_size = os.path.getsize(path)
+    win_type = 'forced' if force_img_format != None else None
 
-            elif img_format == 'jxl':
-                args = get_jxl_base_args(source_format, False, iteration)
-                stderr = subprocess.DEVNULL
+    conversion_jxl = None
+    conversion_avif = None
 
-            args += [path, new_path]
+    if force_img_format != 'avif':
+        conversion_jxl = convert_to_jxl(path, name)
 
-            if iteration != 0:
-                safe_print(f'[{name}] retrying with args [{' '.join(args[:-2])}]')
+    if force_img_format != 'jxl':
+        conversion_avif = convert_to_avif(path, name)
 
-            encode_result = subprocess.run(args, stdout=subprocess.DEVNULL, stderr=stderr)
-            if encode_result.returncode != 0:
-                if os.path.isfile(new_path):
-                    os.remove(new_path)
+    jxl_fail = conversion_jxl == None
+    avif_fail = conversion_avif == None
 
-                return None
+    jxl_path = None
+    jxl_size = None
+    avif_path = None
+    avif_size = None
 
-            new_size = os.path.getsize(new_path)
+    if not jxl_fail:
+        jxl_path, jxl_size = conversion_jxl
 
-        if new_size < old_size:
-            break
+    if not avif_fail:
+        avif_path, avif_size = conversion_avif
 
-        safe_print(f'[{name}] new size ({human_size(new_size, False)}) is bigger than old size ({human_size(old_size, False)})')
-        iteration += 1
+    winner = None
+    if jxl_fail and avif_fail:
+        return None
+    elif jxl_fail and not avif_fail:
+        winner = 'avif'
+        safe_print(f'[{name}] avif won because jxl errored')
+        if win_type == None:
+            win_type = 'error'
+    elif avif_fail and not jxl_fail:
+        winner = 'jxl'
+        safe_print(f'[{name}] jxl won because avif errored')
+        if win_type == None:
+            win_type = 'error'
+    else:
+        winner = 'jxl' if jxl_size <= avif_size else 'avif'
+        win_type = 'fair'
+
+    winner_path = None
+    winner_size = None
+    loser_path = None
+    loser_size = None
+    if winner == 'jxl':
+        winner_path = jxl_path
+        winner_size = jxl_size
+        loser_path = avif_path
+        loser_size = avif_size
+    elif winner == 'avif':
+        winner_path = avif_path
+        winner_size = avif_size
+        loser_path = jxl_path
+        loser_size = jxl_size
+
+    if win_type == 'fair':
+        os.remove(loser_path)
+
+    readable_old_size = human_size(old_size, False)
+    readable_winner_size = human_size(winner_size, False)
+
+    if win_type == 'fair':
+        readable_loser_size = human_size(loser_size, False)
+        win_diff = (1 - (winner_size / loser_size)) * 100
+        safe_print(f'[{name}] {winner} won because it was {win_diff:.2f}% smaller [{readable_winner_size} vs {readable_loser_size}]')
+
+    if winner_size >= old_size:
+        new_diff = winner_size / old_size
+        source_format = Path(path).suffix.lower()[1:]
+        text = f'[{name}] mission failed, converted {winner} is {(new_diff):.2%} bigger than old {source_format}' \
+            f' ({readable_winner_size} vs {readable_old_size})'
+        safe_print(text)
+
+        os.remove(winner_path)
+        return 'compression_fail'
 
     os.remove(path)
-    return [new_path, img_format, old_size, new_size]
+    return [winner_path, winner, old_size, winner_size]
 
 def process_one(dir_path, index, total_count, name):
     files = [f.path for f in os.scandir(dir_path) if not f.is_dir()]
@@ -255,7 +328,7 @@ def process_one(dir_path, index, total_count, name):
 
     path = paths[0]
 
-    result = convert(path, name)
+    result = convert_to_best(path, name)
     match result:
         case 'compression_fail':
             safe_print(f'[{name}] new size was bigger, skipping')
