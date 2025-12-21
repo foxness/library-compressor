@@ -300,7 +300,7 @@ def convert_to_best(path, name):
         safe_print(f'[{name}] {winner} won because it was {win_diff:.2f}% smaller [{readable_winner_size} vs {readable_loser_size}]')
 
     if winner_size >= old_size:
-        new_diff = winner_size / old_size
+        new_diff = winner_size / old_size - 1
         source_format = Path(path).suffix.lower()[1:]
         text = f'[{name}] mission failed, converted {winner} is {(new_diff):.2%} bigger than old {source_format}' \
             f' ({readable_winner_size} vs {readable_old_size})'
