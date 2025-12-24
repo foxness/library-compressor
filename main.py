@@ -48,8 +48,12 @@ format_jxl_win_count = 0
 
 outcomes = {
     'jxl-lossy': 0,
+    'jxl-lossy-technical': 0,
     'jxl-lossless': 0,
+    'jxl-lossless-technical': 0,
     'avif': 0,
+    'avif-technical': 0,
+
     'already-converted': 0,
     'invalid-extension': 0,
     'compression-fail': 0,
@@ -70,7 +74,8 @@ def get_outcome_text(outcomes):
 
     for outcome, count in outcomes.items():
         ratio = count / outcome_count
-        result += f'{outcome}:\t{count}\t{ratio:.2%}\n'
+        outcome_str = f'{outcome}:'
+        result += f'{outcome_str:<23} {count:>6} {ratio:>8.2%}\n'
 
     return result.rstrip()
 
@@ -173,13 +178,13 @@ def jxl_fight(jpg_path, name):
             jxl_lossless_win_count += 1
         safe_print(f'[{name}] lossless won because lossy errored')
         os.rename(lossless_path, final_path)
-        return [final_path, lossless_size]
+        return [final_path, lossless_size, 'jxl-lossless-technical']
     elif lossless_fail and not lossy_fail:
         with jxl_win_count_lock:
             jxl_fight_count += 1
         safe_print(f'[{name}] lossy won because lossless errored')
         os.rename(lossy_path, final_path)
-        return [final_path, lossy_size]
+        return [final_path, lossy_size, 'jxl-lossy-technical']
 
     winner = 'lossless'
     winner_path = lossless_path
@@ -342,6 +347,8 @@ def convert_to_best(path, name):
         readable_loser_size = human_size(loser_size, False)
         win_diff = (1 - (winner_size / loser_size)) * 100
         safe_print(f'[{name}] {winner} won because it was {win_diff:.2f}% smaller [{readable_winner_size} vs {readable_loser_size}]')
+    elif win_type == 'error' and not winner_type.endswith('-technical'):
+        winner_type += '-technical'
 
     if winner_size >= old_size:
         new_diff = winner_size / old_size - 1
