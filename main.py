@@ -6,12 +6,12 @@ import threading
 import queue
 import time
 
-source_dir = '/Volumes/Athena/river-lib/small_lib_test'
+source_dir = '/Volumes/Athena/river-lib/tiny_lib_60'
 
 # --- conversion parameters ---
 
 force_img_format = None
-master_quality = 85
+master_quality = 60
 
 jxl_fighting_enabled = True # pick best between lossy and lossless
 jxl_measure_is_quality = True
@@ -33,25 +33,24 @@ valid_extensions = ['png', 'jpg', 'jpeg', 'gif']
 
 # --- locks ---
 
-converted_lock = threading.Lock()
 print_log_lock = threading.Lock()
 jxl_win_count_lock = threading.Lock()
-format_win_count_lock = threading.Lock()
 outcome_lock = threading.Lock()
 
 # --- counters ---
 
+# counting jxl lossless wins even if they
+# dont end up winning vs avif in the end
 jxl_fight_count = 0
 jxl_lossless_win_count = 0
-format_fight_count = 0
-format_jxl_win_count = 0
 
 outcomes = {
-    'jxl-lossy': 0,
-    'jxl-lossy-technical': 0,
     'jxl-lossless': 0,
-    'jxl-lossless-technical': 0,
+    'jxl-lossy': 0,
     'avif': 0,
+
+    'jxl-lossless-technical': 0,
+    'jxl-lossy-technical': 0,
     'avif-technical': 0,
 
     'already-converted': 0,
@@ -63,11 +62,11 @@ outcomes = {
 }
 
 success_outcomes = [
-    'jxl-lossy',
-    'jxl-lossy-technical',
     'jxl-lossless',
-    'jxl-lossless-technical',
+    'jxl-lossy',
     'avif',
+    'jxl-lossless-technical',
+    'jxl-lossy-technical',
     'avif-technical'
 ]
 
@@ -277,8 +276,6 @@ def convert_to_avif(path, name):
     return [new_path, new_size]
 
 def convert_to_best(path, name):
-    global format_fight_count, format_jxl_win_count
-
     old_size = os.path.getsize(path)
     win_type = 'forced' if force_img_format != None else None
 
@@ -343,12 +340,6 @@ def convert_to_best(path, name):
 
     if win_type == 'fair':
         os.remove(loser_path)
-
-    if win_type != 'forced':
-        with format_win_count_lock:
-            format_fight_count += 1
-            if winner == 'jxl':
-                format_jxl_win_count += 1
 
     readable_old_size = human_size(old_size, False)
     readable_winner_size = human_size(winner_size, False)
@@ -443,11 +434,6 @@ def work(name, queue, total_count):
         with outcome_lock:
             outcomes[outcome] += 1
 
-        if outcome in success_outcomes:
-            with converted_lock:
-                global converted_count
-                converted_count += 1
-
         queue.task_done()
 
 def start_work(image_dirs):
@@ -464,15 +450,13 @@ def start_work(image_dirs):
         q.put([index, image_dir])
 
     q.join()
-    safe_print('all work completed')
+    safe_print('\nall work completed')
 
 def main():
     size = get_size(source_dir)
     image_dirs = [f.path for f in os.scandir(source_dir) if f.is_dir()]
 
     total_count = len(image_dirs)
-    global converted_count
-    converted_count = 0
 
     start = time.time()
     safe_print(f'starting conversion of {source_dir}')
@@ -485,11 +469,9 @@ def main():
     new_size = get_size(source_dir)
     reduction = (1 - (new_size / size)) * -100
 
+    converted_count = sum([outcomes[a] for a in success_outcomes])
     safe_print(f'converted {converted_count} files out of {total_count} ({(converted_count / total_count):.2%})')
     safe_print(f'old size: {human_size(size, True)}, new size: {human_size(new_size, True)}, reduction: {reduction:.2f}%')
-
-    if force_img_format == None and format_fight_count != 0:
-        safe_print(f'jxl wins: {(format_jxl_win_count / format_fight_count):.2%} ({format_jxl_win_count}/{format_fight_count})')
 
     if jxl_fighting_enabled and jxl_fight_count != 0:
         safe_print(f'jxl lossless wins: {(jxl_lossless_win_count / jxl_fight_count):.2%} ({jxl_lossless_win_count}/{jxl_fight_count})')
