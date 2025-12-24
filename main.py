@@ -58,8 +58,18 @@ outcomes = {
     'invalid-extension': 0,
     'compression-fail': 0,
     'conversion-error': 0,
-    'invalid-directory': 0
+    'no-metadata': 0,
+    'no-image': 0
 }
+
+success_outcomes = [
+    'jxl-lossy',
+    'jxl-lossy-technical',
+    'jxl-lossless',
+    'jxl-lossless-technical',
+    'avif',
+    'avif-technical'
+]
 
 # --- logging ---
 
@@ -365,7 +375,13 @@ def convert_to_best(path, name):
 
 def process_one(dir_path, index, total_count, name):
     files = [f.path for f in os.scandir(dir_path) if not f.is_dir()]
-    metadata_file = [a for a in files if os.path.basename(a) == 'metadata.json'][0]
+    metadata_file = [a for a in files if os.path.basename(a) == 'metadata.json']
+    if not metadata_file:
+        safe_print(f'[{name}] couldn\'t find metadata file, skipping')
+        return 'no-metadata'
+
+    metadata_file = metadata_file[0]
+
     with open(metadata_file, 'r') as file:
         metadata = json.load(file)
 
@@ -384,7 +400,7 @@ def process_one(dir_path, index, total_count, name):
     paths = [a for a in files if os.path.basename(a) == image_name]
     if not paths:
         safe_print(f'[{name}] could not find the image, skipping')
-        return 'invalid-directory'
+        return 'no-image'
 
     path = paths[0]
 
@@ -427,7 +443,7 @@ def work(name, queue, total_count):
         with outcome_lock:
             outcomes[outcome] += 1
 
-        if outcome in ['jxl-lossy', 'jxl-lossless', 'avif']:
+        if outcome in success_outcomes:
             with converted_lock:
                 global converted_count
                 converted_count += 1
