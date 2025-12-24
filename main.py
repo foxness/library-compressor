@@ -6,37 +6,73 @@ import threading
 import queue
 import time
 
-source_dir = '/Volumes/Athena/river-lib/small_lib_jxl85_avif80_nojxlfight'
+source_dir = '/Volumes/Athena/river-lib/small_lib_test'
+
+# --- conversion parameters ---
 
 force_img_format = None
-master_quality = None
+master_quality = 85
 
-jxl_fighting_enabled = False # pick best between lossy and lossless
+jxl_fighting_enabled = True # pick best between lossy and lossless
 jxl_measure_is_quality = True
 jxl_quality = master_quality if master_quality != None else 85
 jxl_distance = 2
 
-avif_quality = master_quality if master_quality != None else 80
+avif_quality = master_quality if master_quality != None else 85
+
+# --- multithreading ---
 
 worker_count = 8
 encoder_thread_count = None
 # optimal for jxl: w8 e4
 
+# --- extensions ---
+
 converted_extensions = ['avif', 'jxl', 'webp']
 valid_extensions = ['png', 'jpg', 'jpeg', 'gif']
+
+# --- locks ---
 
 converted_lock = threading.Lock()
 print_log_lock = threading.Lock()
 jxl_win_count_lock = threading.Lock()
 format_win_count_lock = threading.Lock()
+outcome_lock = threading.Lock()
+
+# --- counters ---
 
 jxl_fight_count = 0
 jxl_lossless_win_count = 0
 format_fight_count = 0
 format_jxl_win_count = 0
 
+outcomes = {
+    'jxl-lossy': 0,
+    'jxl-lossless': 0,
+    'avif': 0,
+    'already-converted': 0,
+    'invalid-extension': 0,
+    'compression-fail': 0,
+    'conversion-error': 0,
+    'invalid-directory': 0
+}
+
+# --- logging ---
+
 log_dir = '/Volumes/Athena/river-lib/'
 conversion_log = ""
+
+def get_outcome_text(outcomes):
+    result = '\n'
+
+    outcome_count = sum(list(outcomes.values()))
+    result += f'Total: {outcome_count}\n\n'
+
+    for outcome, count in outcomes.items():
+        ratio = count / outcome_count
+        result += f'{outcome}:\t{count}\t{ratio:.2%}\n'
+
+    return result.rstrip()
 
 def get_log_name():
     q = (jxl_quality if jxl_measure_is_quality else jxl_distance) if force_img_format == 'jxl' else avif_quality
@@ -169,9 +205,11 @@ def jxl_fight(jpg_path, name):
         if winner == 'lossless':
             jxl_lossless_win_count += 1
 
+    winner_type = f'jxl-{winner}'
+
     os.remove(loser_path)
     os.rename(winner_path, final_path)
-    return [final_path, winner_size]
+    return [final_path, winner_size, winner_type]
 
 def convert_to_jxl(path, name):
     img_format = 'jxl'
@@ -180,13 +218,14 @@ def convert_to_jxl(path, name):
     source_format = old_path.suffix.lower()[1:]
     new_path = old_path.with_suffix(f'.{img_format}').resolve()
     new_size = None
+    winner_type = None
 
     if jxl_fighting_enabled and (source_format == 'jpg' or source_format == 'jpeg'):
         jxl_fight_result = jxl_fight(path, name)
         if jxl_fight_result == None:
             return None
 
-        new_path, new_size = jxl_fight_result
+        new_path, new_size, winner_type = jxl_fight_result
     else:
         args = get_jxl_base_args(source_format, False, 0)
         args += [path, new_path]
@@ -199,8 +238,9 @@ def convert_to_jxl(path, name):
             return None
 
         new_size = os.path.getsize(new_path)
+        winner_type = 'jxl-lossy'
 
-    return [new_path, new_size]
+    return [new_path, new_size, winner_type]
 
 def convert_to_avif(path, name):
     img_format = 'avif'
@@ -241,11 +281,12 @@ def convert_to_best(path, name):
 
     jxl_path = None
     jxl_size = None
+    jxl_winner_type = None
     avif_path = None
     avif_size = None
 
     if not jxl_fail:
-        jxl_path, jxl_size = conversion_jxl
+        jxl_path, jxl_size, jxl_winner_type = conversion_jxl
 
     if not avif_fail:
         avif_path, avif_size = conversion_avif
@@ -271,16 +312,19 @@ def convert_to_best(path, name):
     winner_size = None
     loser_path = None
     loser_size = None
+    winner_type = None
     if winner == 'jxl':
         winner_path = jxl_path
         winner_size = jxl_size
         loser_path = avif_path
         loser_size = avif_size
+        winner_type = jxl_winner_type
     elif winner == 'avif':
         winner_path = avif_path
         winner_size = avif_size
         loser_path = jxl_path
         loser_size = jxl_size
+        winner_type = 'avif'
 
     if win_type == 'fair':
         os.remove(loser_path)
@@ -310,7 +354,7 @@ def convert_to_best(path, name):
         return 'compression_fail'
 
     os.remove(path)
-    return [winner_path, winner, old_size, winner_size]
+    return [winner_path, winner, old_size, winner_size, winner_type]
 
 def process_one(dir_path, index, total_count, name):
     files = [f.path for f in os.scandir(dir_path) if not f.is_dir()]
@@ -324,18 +368,16 @@ def process_one(dir_path, index, total_count, name):
 
     if extension in converted_extensions:
         safe_print(f'[{name}] {extension} is already converted, skipping')
-
-        return False
+        return 'already-converted'
 
     if extension not in valid_extensions:
         safe_print(f'[{name}] {extension} is not a valid extension, skipping')
-
-        return False
+        return 'invalid-extension'
 
     paths = [a for a in files if os.path.basename(a) == image_name]
     if not paths:
         safe_print(f'[{name}] could not find the image, skipping')
-        return False
+        return 'invalid-directory'
 
     path = paths[0]
 
@@ -343,12 +385,12 @@ def process_one(dir_path, index, total_count, name):
     match result:
         case 'compression_fail':
             safe_print(f'[{name}] new size was bigger, skipping')
-            return False
+            return 'compression-fail'
         case None:
             safe_print(f'[{name}] error during conversion, skipping')
-            return False
+            return 'conversion-error'
 
-    new_path, img_format, old_size, new_size = result
+    new_path, img_format, old_size, new_size, winner_type = result
 
     metadata['ext'] = img_format
     metadata['size'] = new_size
@@ -368,14 +410,17 @@ def process_one(dir_path, index, total_count, name):
     f"{index}/{total_count} {progress:.2f}%"
     safe_print(to_print)
 
-    return True
+    return winner_type
 
 def work(name, queue, total_count):
     while True:
         index, image_dir = queue.get()
 
-        did_convert = process_one(image_dir, index, total_count, name)
-        if did_convert:
+        outcome = process_one(image_dir, index, total_count, name)
+        with outcome_lock:
+            outcomes[outcome] += 1
+
+        if outcome in ['jxl-lossy', 'jxl-lossless', 'avif']:
             with converted_lock:
                 global converted_count
                 converted_count += 1
@@ -426,6 +471,7 @@ def main():
     if jxl_fighting_enabled and jxl_fight_count != 0:
         safe_print(f'jxl lossless wins: {(jxl_lossless_win_count / jxl_fight_count):.2%} ({jxl_lossless_win_count}/{jxl_fight_count})')
 
+    safe_print(get_outcome_text(outcomes))
     safe_print(f'\nfinished in {elapsed:.2f}s, {(total_count / elapsed):.2f} files/s')
 
     log_path = log_dir + get_log_name()
