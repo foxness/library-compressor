@@ -76,7 +76,10 @@ success_outcomes = [
     'avif',
     'jxl-lossless-technical',
     'jxl-lossy-technical',
-    'avif-technical'
+    'avif-technical',
+    'jxl-lossless-threshold',
+    'jxl-lossy-threshold',
+    'avif-threshold'
 ]
 
 # --- logging ---
