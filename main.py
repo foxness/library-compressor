@@ -6,12 +6,16 @@ import threading
 import queue
 import time
 
-source_dir = '/Volumes/Athena/river-lib/tiny_lib_60'
+source_dir = '/Volumes/Athena/river-lib/medium_jpg_lib_test'
 
 # --- conversion parameters ---
 
 force_img_format = None
-master_quality = 60
+master_quality = 85
+
+# if the lossy version saves less than this % of space,
+# we keep the smallest lossless version instead
+lossy_throwaway_threshold = 0.03
 
 jxl_fighting_enabled = True # pick best between lossy and lossless
 jxl_measure_is_quality = True
@@ -53,10 +57,15 @@ outcomes = {
     'jxl-lossy-technical': 0,
     'avif-technical': 0,
 
+    'jxl-lossless-threshold': 0,
+    'jxl-lossy-threshold': 0,
+    'avif-threshold': 0,
+
     'already-converted': 0,
     'invalid-extension': 0,
     'compression-fail': 0,
     'conversion-error': 0,
+    'threshold-fail': 0,
     'no-metadata': 0,
     'no-image': 0
 }
@@ -140,7 +149,10 @@ def safe_print(*a, **b):
         conversion_log += f'{a[0]}\n'
         print(*a, **b)
 
-def jxl_fight(jpg_path, name):
+def passes_lossy_threshold(old_size, new_size):
+    return new_size < old_size * (1 - lossy_throwaway_threshold)
+
+def jxl_fight(jpg_path, name, old_size):
     global jxl_fight_count, jxl_lossless_win_count
 
     old_path = Path(jpg_path)
@@ -164,11 +176,18 @@ def jxl_fight(jpg_path, name):
 
     lossy_result = subprocess.run(lossy_args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     lossy_fail = lossy_result.returncode != 0
+    lossy_fail_type = None
     if lossy_fail:
+        lossy_fail_type = 'error'
         if os.path.isfile(lossy_path):
             os.remove(lossy_path)
     else:
         lossy_size = os.path.getsize(lossy_path)
+        if not passes_lossy_threshold(old_size, lossy_size):
+            lossy_fail = True
+            lossy_fail_type = 'threshold'
+            os.remove(lossy_path)
+            safe_print(f'[{name}] jxl lossy didn\'t pass threshold')
 
     lossless_result = subprocess.run(lossless_args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     lossless_fail = lossless_result.returncode != 0
@@ -180,18 +199,24 @@ def jxl_fight(jpg_path, name):
 
     if lossy_fail and lossless_fail:
         safe_print(f'[{name}] this is an epic fail, aborting')
-        return None
+        return 'jxl-lossy-threshold-fail' if lossy_fail_type == 'threshold' else 'conversion-error'
     elif lossy_fail and not lossless_fail:
         with jxl_win_count_lock:
             jxl_fight_count += 1
             jxl_lossless_win_count += 1
-        safe_print(f'[{name}] lossless won because lossy errored')
+
         os.rename(lossless_path, final_path)
-        return [final_path, lossless_size, 'jxl-lossless-technical']
+        if lossy_fail_type == 'error':
+            safe_print(f'[{name}] lossless won because lossy errored')
+            return [final_path, lossless_size, 'jxl-lossless-technical']
+        elif lossy_fail_type == 'threshold':
+            safe_print(f'[{name}] lossless won because lossy failed threshold')
+            return [final_path, lossless_size, 'jxl-lossless-threshold']
     elif lossless_fail and not lossy_fail:
         with jxl_win_count_lock:
             jxl_fight_count += 1
         safe_print(f'[{name}] lossy won because lossless errored')
+
         os.rename(lossy_path, final_path)
         return [final_path, lossy_size, 'jxl-lossy-technical']
 
@@ -225,7 +250,7 @@ def jxl_fight(jpg_path, name):
     os.rename(winner_path, final_path)
     return [final_path, winner_size, winner_type]
 
-def convert_to_jxl(path, name):
+def convert_to_jxl(path, name, old_size):
     img_format = 'jxl'
 
     old_path = Path(path)
@@ -235,9 +260,10 @@ def convert_to_jxl(path, name):
     winner_type = None
 
     if jxl_fighting_enabled and (source_format == 'jpg' or source_format == 'jpeg'):
-        jxl_fight_result = jxl_fight(path, name)
-        if jxl_fight_result == None:
-            return None
+        jxl_fight_result = jxl_fight(path, name, old_size)
+        match jxl_fight_result:
+            case 'conversion-error' | 'jxl-lossy-threshold-fail':
+                return jxl_fight_result
 
         new_path, new_size, winner_type = jxl_fight_result
     else:
@@ -249,14 +275,18 @@ def convert_to_jxl(path, name):
             if os.path.isfile(new_path):
                 os.remove(new_path)
 
-            return None
+            return 'conversion-error'
 
         new_size = os.path.getsize(new_path)
-        winner_type = 'jxl-lossy'
+        if passes_lossy_threshold(old_size, new_size):
+            winner_type = 'jxl-lossy'
+        else:
+            os.remove(new_path)
+            return 'jxl-lossy-threshold-fail'
 
     return [new_path, new_size, winner_type]
 
-def convert_to_avif(path, name):
+def convert_to_avif(path, name, old_size):
     img_format = 'avif'
 
     new_path = Path(path).with_suffix(f'.{img_format}').resolve()
@@ -270,9 +300,13 @@ def convert_to_avif(path, name):
         if os.path.isfile(new_path):
             os.remove(new_path)
 
-        return None
+        return 'conversion-error'
 
     new_size = os.path.getsize(new_path)
+    if not passes_lossy_threshold(old_size, new_size):
+        os.remove(new_path)
+        return 'avif-threshold-fail'
+
     return [new_path, new_size]
 
 def convert_to_best(path, name):
@@ -283,13 +317,15 @@ def convert_to_best(path, name):
     conversion_avif = None
 
     if force_img_format != 'avif':
-        conversion_jxl = convert_to_jxl(path, name)
+        conversion_jxl = convert_to_jxl(path, name, old_size)
 
     if force_img_format != 'jxl':
-        conversion_avif = convert_to_avif(path, name)
+        conversion_avif = convert_to_avif(path, name, old_size)
 
-    jxl_fail = conversion_jxl == None
-    avif_fail = conversion_avif == None
+    jxl_fail = isinstance(conversion_jxl, str)
+    avif_fail = isinstance(conversion_avif, str)
+    jxl_fail_type = conversion_jxl if jxl_fail else None
+    avif_fail_type = conversion_avif if avif_fail else None
 
     jxl_path = None
     jxl_size = None
@@ -305,17 +341,31 @@ def convert_to_best(path, name):
 
     winner = None
     if jxl_fail and avif_fail:
-        return None
+        if jxl_fail_type == 'jxl-lossy-threshold-fail' or avif_fail_type == 'avif-threshold-fail':
+            return 'threshold-fail'
+        return 'conversion-error'
     elif jxl_fail and not avif_fail:
         winner = 'avif'
-        safe_print(f'[{name}] avif won because jxl errored')
-        if win_type == None:
-            win_type = 'error'
+
+        if jxl_fail_type == 'jxl-lossy-threshold-fail':
+            safe_print(f'[{name}] avif won because jxl failed threshold')
+            if win_type == None:
+                win_type = 'threshold'
+        else:
+            safe_print(f'[{name}] avif won because jxl errored')
+            if win_type == None:
+                win_type = 'error'
     elif avif_fail and not jxl_fail:
         winner = 'jxl'
-        safe_print(f'[{name}] jxl won because avif errored')
-        if win_type == None:
-            win_type = 'error'
+
+        if avif_fail_type == 'avif-threshold-fail':
+            safe_print(f'[{name}] jxl won because avif failed threshold')
+            if win_type == None:
+                win_type = 'threshold'
+        else:
+            safe_print(f'[{name}] jxl won because avif errored')
+            if win_type == None:
+                win_type = 'error'
     else:
         winner = 'jxl' if jxl_size <= avif_size else 'avif'
         win_type = 'fair'
@@ -350,6 +400,8 @@ def convert_to_best(path, name):
         safe_print(f'[{name}] {winner} won because it was {win_diff:.2f}% smaller [{readable_winner_size} vs {readable_loser_size}]')
     elif win_type == 'error' and not winner_type.endswith('-technical'):
         winner_type += '-technical'
+    elif win_type == 'threshold' and not winner_type.endswith('-threshold'):
+        winner_type += '-threshold'
 
     if winner_size >= old_size:
         new_diff = winner_size / old_size - 1
@@ -400,9 +452,12 @@ def process_one(dir_path, index, total_count, name):
         case 'compression_fail':
             safe_print(f'[{name}] new size was bigger, skipping')
             return 'compression-fail'
-        case None:
+        case 'conversion-error':
             safe_print(f'[{name}] error during conversion, skipping')
             return 'conversion-error'
+        case 'threshold-fail':
+            safe_print(f'[{name}] everyone failed the threshold or errored, skipping')
+            return 'threshold-fail'
 
     new_path, img_format, old_size, new_size, winner_type = result
 
