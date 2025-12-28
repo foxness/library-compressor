@@ -6,7 +6,7 @@ import threading
 import queue
 import time
 
-source_dir = '/Volumes/Athena/river-lib/tiny_lib_testy'
+source_dir = '/Volumes/Athena/river-lib/tiny_png_lib_85'
 
 # --- conversion parameters ---
 
@@ -496,6 +496,15 @@ def process_one(dir_path, index, total_count, name):
 
     return winner_type
 
+class Convertable:
+    def __init__(self, img_format, temp_path, final_path, return_code):
+        self.img_format = img_format
+        self.temp_path = temp_path
+        self.final_path = final_path
+        self.return_code = return_code
+        self.fail = None
+        self.size = None
+
 def avif_conversion(path, name):
     img_format = 'avif'
 
@@ -514,7 +523,7 @@ def avif_conversion(path, name):
     encode_result = subprocess.run(args, stdout=subprocess.DEVNULL)
     return_code = encode_result.returncode
 
-    return [img_format, temp_path, final_path, return_code]
+    return Convertable(img_format, temp_path, final_path, return_code)
 
 def jxl_lossy_conversion(path, name):
     img_format = 'jxl-lossy'
@@ -535,7 +544,7 @@ def jxl_lossy_conversion(path, name):
     encode_result = subprocess.run(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return_code = encode_result.returncode
 
-    return [img_format, temp_path, final_path, return_code]
+    return Convertable(img_format, temp_path, final_path, return_code)
 
 def jxl_lossless_conversion(path, name):
     img_format = 'jxl-lossless'
@@ -556,61 +565,64 @@ def jxl_lossless_conversion(path, name):
     encode_result = subprocess.run(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return_code = encode_result.returncode
 
-    return [img_format, temp_path, final_path, return_code]
+    return Convertable(img_format, temp_path, final_path, return_code)
 
-def handle_errors(img_format, path, return_code, name):
-    if return_code == 0:
-        return [img_format, path, None]
+def handle_errors(convertable, name):
+    if convertable.return_code == 0:
+        return
 
-    error = 'conversion-error'
-    safe_print(f'[{name}] {img_format} errored: {error}')
+    convertable.fail = 'conversion-error'
+    safe_print(f'[{name}] {convertable.img_format} errored: {convertable.fail}')
 
-    if os.path.isfile(path):
-        os.remove(path)
+    if os.path.isfile(convertable.temp_path):
+        os.remove(convertable.temp_path)
 
-    return [img_format, None, error]
-
-def filter_by_size(path, converted, name):
-    old_size = os.path.getsize(path)
-
-    result = []
-    for img_format, temp_path, final_path in converted:
-        new_size = os.path.getsize(temp_path)
-        is_lossless = img_format == 'jxl-lossless'
-
-        passes_original = new_size < old_size
-        passes_threshold = is_lossless or (passes_original and passes_lossy_threshold(old_size, new_size))
-
-        if passes_threshold:
-            result.append([img_format, temp_path, final_path, new_size])
+def filter_by_size(source_format, old_size, convertables, name):
+    for convertable in convertables:
+        if convertable.fail != None:
             continue
 
-        source_format = Path(path).suffix.lower()[1:]
-        diff, vs_text = size_comparison(new_size, old_size, False)
+        convertable.size = os.path.getsize(convertable.temp_path)
+        is_lossless = convertable.img_format == 'jxl-lossless'
+
+        passes_original = convertable.size < old_size
+        passes_threshold = is_lossless or (passes_original and passes_lossy_threshold(old_size, convertable.size))
+
+        if passes_threshold:
+            continue
+
+        diff, vs_text = size_comparison(convertable.size, old_size, False)
 
         if passes_original:
-            safe_print(f'[{name}] converted {img_format} is only {(-diff):.2%} smaller than old {source_format} ({vs_text}) [within throwaway threshold]')
+            convertable.fail = 'threshold-fail'
+            safe_print(f'[{name}] converted {convertable.img_format} is only {(-diff):.2%} smaller than old {source_format} ({vs_text}) [{convertable.fail}]')
         else:
-            safe_print(f'[{name}] converted {img_format} is {diff:.2%} bigger than old {source_format} ({vs_text}) [utter fail]')
+            convertable.fail = 'compression-fail'
+            safe_print(f'[{name}] converted {convertable.img_format} is {diff:.2%} bigger than old {source_format} ({vs_text}) [{convertable.fail}]')
 
-        os.remove(temp_path)
+        os.remove(convertable.temp_path)
 
-    return result
+def filter_losers(convertables, name):
+    candidates = [a for a in convertables if a.fail == None]
+    fails = [a for a in convertables if a.fail != None]
 
-def filter_losers(converted, name):
-    if not converted:
+    fail_text = ', '.join([f'{a.img_format} ({a.fail})' for a in fails])
+
+    if not candidates:
+        safe_print(f'[{name}] no winners today{'' if not fails else f', fails: {fail_text}'}')
         return None
 
-    size_sorted = sorted(converted, key=lambda a: a[3])
+    size_sorted = sorted(candidates, key=lambda a: a.size)
     winner = size_sorted[0]
     losers = size_sorted[1:]
 
-    list_text = ', '.join([f'{a[0]} ({human_size(a[3], False)})' for a in size_sorted])
+    list_text = ', '.join([f'{a.img_format} ({human_size(a.size, False)})' for a in size_sorted])
     count = len(size_sorted)
-    safe_print(f'[{name}] {count} candidate{'' if count == 1 else 's'}: {list_text}')
+    safe_print(f'[{name}] {count} candidate{'' if count == 1 else 's'}: {list_text}{'' if not fails else f', fails: {fail_text}'}')
 
-    for img_format, temp_path, final_path, new_size in losers:
-        os.remove(temp_path)
+    for loser in losers:
+        loser.fail = 'loser'
+        os.remove(loser.temp_path)
 
     return winner
 
@@ -618,40 +630,29 @@ def convert_to_best_new(path, name):
     conversions = [avif_conversion, jxl_lossy_conversion]
 
     old_path = Path(path)
+    old_size = os.path.getsize(path)
     source_format = old_path.suffix.lower()[1:]
 
     if (source_format == 'jpg' or source_format == 'jpeg') and jxl_fighting_enabled:
         conversions.append(jxl_lossless_conversion)
 
-    converted = []
+    convertables = []
     for conversion in conversions:
-        img_format, temp_path, final_path, return_code = conversion(path, name)
-        img_format, temp_path, error = handle_errors(img_format, temp_path, return_code, name)
+        convertable = conversion(path, name)
+        handle_errors(convertable, name)
 
-        if error != None:
-            continue
+        convertables.append(convertable)
 
-        converted.append([img_format, temp_path, final_path])
-
-    filtered = filter_by_size(path, converted, name)
-    winner = filter_losers(filtered, name)
+    filter_by_size(source_format, old_size, convertables, name)
+    winner = filter_losers(convertables, name)
 
     if winner == None:
         return None
 
-    winner_format, temp_path, final_path, winner_size = winner
-    old_size = os.path.getsize(path)
-    extension = None
-    match winner_format:
-        case 'avif':
-            extension = 'avif'
-        case 'jxl-lossy' | 'jxl-lossless':
-            extension = 'jxl'
-
     os.remove(path)
-    os.rename(temp_path, final_path)
+    os.rename(winner.temp_path, winner.final_path)
 
-    return [final_path, extension, old_size, winner_size, winner_format]
+    return [winner, old_size]
 
 def process_one_new(dir_path, index, total_count, name):
     files = [f.path for f in os.scandir(dir_path) if not f.is_dir()]
@@ -686,6 +687,8 @@ def process_one_new(dir_path, index, total_count, name):
 
     result = convert_to_best_new(path, name)
     match result:
+        case None:
+            return 'conversion-error' # temporary
         case 'compression_fail':
             safe_print(f'[{name}] new size was bigger, skipping')
             return 'compression-fail'
@@ -696,18 +699,18 @@ def process_one_new(dir_path, index, total_count, name):
             safe_print(f'[{name}] everyone failed the threshold or errored, skipping')
             return 'threshold-fail'
 
-    new_path, img_format, old_size, new_size, winner_type = result
+    winner, old_size = result
 
-    metadata['ext'] = img_format
-    metadata['size'] = new_size
+    metadata['ext'] = get_extension(winner.img_format)
+    metadata['size'] = winner.size
     with open(metadata_file, 'w') as file:
         json.dump(metadata, file)
 
-    reduction = (1 - (new_size / old_size)) * -100
+    reduction = (1 - (winner.size / old_size)) * -100
     index += 1
     progress = (index / total_count) * 100
     readable_old_size = human_size(old_size, False)
-    readable_new_size = human_size(new_size, False)
+    readable_new_size = human_size(winner.size, False)
 
     to_print = f"[{name}] done.\t" \
     f"old: {readable_old_size},\t" \
@@ -716,7 +719,7 @@ def process_one_new(dir_path, index, total_count, name):
     f"{index}/{total_count} {progress:.2f}%"
     safe_print(to_print)
 
-    return winner_type
+    return winner.img_format
 
 def work(name, queue, total_count):
     while True:
