@@ -155,6 +155,18 @@ def safe_print(*a, **b):
 def passes_lossy_threshold(old_size, new_size):
     return new_size < old_size * (1 - lossy_throwaway_threshold)
 
+def get_extension(img_format):
+    return img_format.split('-')[0]
+
+def size_comparison(size_a, size_b, is_kilobytes):
+    a_diff = size_a / size_b - 1
+
+    readable_size_a = human_size(size_a, is_kilobytes)
+    readable_size_b = human_size(size_b, is_kilobytes)
+    vs_text = f'{readable_size_a} vs {readable_size_b}'
+
+    return [a_diff, vs_text]
+
 def jxl_fight(jpg_path, name, old_size):
     global jxl_fight_count, jxl_lossless_win_count
 
@@ -558,26 +570,16 @@ def handle_errors(img_format, path, return_code, name):
 
     return [img_format, None, error]
 
-def size_comparison(size_a, size_b, is_kilobytes):
-    a_diff = size_a / size_b - 1
-
-    readable_size_a = human_size(size_a, is_kilobytes)
-    readable_size_b = human_size(size_b, is_kilobytes)
-    vs_text = f'{readable_size_a} vs {readable_size_b}'
-
-    return [a_diff, vs_text]
-
-def get_extension(img_format):
-    return img_format.split('-')[0]
-
 def filter_by_size(path, converted, name):
     old_size = os.path.getsize(path)
 
     result = []
     for img_format, temp_path, final_path in converted:
         new_size = os.path.getsize(temp_path)
+        is_lossless = img_format == 'jxl-lossless'
+
         passes_original = new_size < old_size
-        passes_threshold = passes_original and passes_lossy_threshold(old_size, new_size)
+        passes_threshold = is_lossless or (passes_original and passes_lossy_threshold(old_size, new_size))
 
         if passes_threshold:
             result.append([img_format, temp_path, final_path, new_size])
@@ -587,7 +589,7 @@ def filter_by_size(path, converted, name):
         diff, vs_text = size_comparison(new_size, old_size, False)
 
         if passes_original:
-            safe_print(f'[{name}] converted {img_format} is {(-diff):.2%} smaller than old {source_format} ({vs_text}) [within throwaway threshold]')
+            safe_print(f'[{name}] converted {img_format} is only {(-diff):.2%} smaller than old {source_format} ({vs_text}) [within throwaway threshold]')
         else:
             safe_print(f'[{name}] converted {img_format} is {diff:.2%} bigger than old {source_format} ({vs_text}) [utter fail]')
 
@@ -604,7 +606,8 @@ def filter_losers(converted, name):
     losers = size_sorted[1:]
 
     list_text = ', '.join([f'{a[0]} ({human_size(a[3], False)})' for a in size_sorted])
-    safe_print(f'[{name}] {len(size_sorted)} candidates: {list_text}')
+    count = len(size_sorted)
+    safe_print(f'[{name}] {count} candidate{'' if count == 1 else 's'}: {list_text}')
 
     for img_format, temp_path, final_path, new_size in losers:
         os.remove(temp_path)
