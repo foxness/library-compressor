@@ -6,7 +6,7 @@ import threading
 import queue
 import time
 
-source_dir = '/Volumes/Athena/river-lib/tiny_jpg_lib copy'
+source_dir = '/Volumes/Athena/river-lib/small_lib copy'
 
 # --- conversion parameters ---
 
@@ -40,6 +40,7 @@ valid_extensions = ['png', 'jpg', 'jpeg', 'gif']
 print_log_lock = threading.Lock()
 jxl_win_count_lock = threading.Lock()
 outcome_lock = threading.Lock()
+fail_counter_lock = threading.Lock()
 
 # --- counters ---
 
@@ -68,6 +69,12 @@ success_outcomes = [
     'avif'
 ]
 
+fail_counter = {
+    'threshold-fail': 0,
+    'compression-fail': 0,
+    'conversion-error': 0
+}
+
 # --- logging ---
 
 log_dir = '/Volumes/Athena/river-lib/'
@@ -77,12 +84,25 @@ def get_outcome_text(outcomes):
     result = '\n'
 
     outcome_count = sum(list(outcomes.values()))
-    result += f'Total: {outcome_count}\n\n'
+    result += f'Total outcomes: {outcome_count}\n\n'
 
     for outcome, count in outcomes.items():
         ratio = count / outcome_count
         outcome_str = f'{outcome}:'
         result += f'{outcome_str:<23} {count:>6} {ratio:>8.2%}\n'
+
+    return result.rstrip()
+
+def get_fail_counter_text(fail_counter):
+    result = '\n'
+
+    fail_count = sum(list(fail_counter.values()))
+    result += f'Total fails: {fail_count}\n\n'
+
+    for fail, count in fail_counter.items():
+        ratio = count / fail_count
+        fail_str = f'{fail}:'
+        result += f'{fail_str:<23} {count:>6} {ratio:>8.2%}\n'
 
     return result.rstrip()
 
@@ -661,8 +681,13 @@ def print_result(winner, old_size, index, total_count, name):
 def handle_result(result, metadata, metadata_file, index, total_count, name):
     winner, fails, old_size = result
 
+    fails = [a.fail for a in fails]
+    with fail_counter_lock:
+        for fail in fails:
+            if fail != 'loser':
+                fail_counter[fail] += 1
+
     if winner == None:
-        fails = [a.fail for a in fails]
         fail_priority = ['threshold-fail', 'compression-fail', 'conversion-error']
 
         for fail in fail_priority:
@@ -765,6 +790,7 @@ def main():
         safe_print(f'jxl lossless wins: {(jxl_lossless_win_count / jxl_fight_count):.2%} ({jxl_lossless_win_count}/{jxl_fight_count})')
 
     safe_print(get_outcome_text(outcomes))
+    safe_print(get_fail_counter_text(fail_counter))
     safe_print(f'\nfinished in {elapsed:.2f}s, {(total_count / elapsed):.2f} files/s')
 
     log_path = log_dir + get_log_name()
