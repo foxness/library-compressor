@@ -53,33 +53,19 @@ outcomes = {
     'jxl-lossy': 0,
     'avif': 0,
 
-    'jxl-lossless-technical': 0,
-    'jxl-lossy-technical': 0,
-    'avif-technical': 0,
-
-    'jxl-lossless-threshold': 0,
-    'jxl-lossy-threshold': 0,
-    'avif-threshold': 0,
-
+    'no-metadata': 0,
     'already-converted': 0,
+    'no-image': 0,
     'invalid-extension': 0,
     'compression-fail': 0,
-    'conversion-error': 0,
     'threshold-fail': 0,
-    'no-metadata': 0,
-    'no-image': 0
+    'conversion-error': 0
 }
 
 success_outcomes = [
     'jxl-lossless',
     'jxl-lossy',
-    'avif',
-    'jxl-lossless-technical',
-    'jxl-lossy-technical',
-    'avif-technical',
-    'jxl-lossless-threshold',
-    'jxl-lossy-threshold',
-    'avif-threshold'
+    'avif'
 ]
 
 # --- logging ---
@@ -609,7 +595,7 @@ def filter_losers(convertables, name):
 
     if not candidates:
         safe_print(f'[{name}] no winners today{'' if not fails else f', fails: {fail_text}'}')
-        return None
+        return [None, fails]
 
     size_sorted = sorted(candidates, key=lambda a: a.size)
     winner = size_sorted[0]
@@ -623,7 +609,7 @@ def filter_losers(convertables, name):
         loser.fail = 'loser'
         os.remove(loser.temp_path)
 
-    return winner
+    return [winner, fails + losers]
 
 def convert_to_best_new(path, name):
     conversions = [avif_conversion, jxl_lossy_conversion]
@@ -643,15 +629,52 @@ def convert_to_best_new(path, name):
         convertables.append(convertable)
 
     filter_by_size(old_size, convertables, name)
-    winner = filter_losers(convertables, name)
+    winner, fails = filter_losers(convertables, name)
 
     if winner == None:
-        return None
+        return [None, fails, None]
 
     os.remove(path)
     os.rename(winner.temp_path, winner.final_path)
 
-    return [winner, old_size]
+    return [winner, fails, old_size]
+
+def print_result(winner, old_size, index, total_count, name):
+    reduction = (1 - (winner.size / old_size)) * -100
+    index += 1
+    progress = (index / total_count) * 100
+    readable_old_size = human_size(old_size, False)
+    readable_new_size = human_size(winner.size, False)
+
+    to_print = f"[{name}] done.\t" \
+    f"{winner.input_format}: {readable_old_size},\t" \
+    f"{winner.output_format}: {readable_new_size},\t" \
+    f"r: {reduction:.2f}%,\t" \
+    f"{index}/{total_count} {progress:.2f}%"
+
+    safe_print(to_print)
+
+def handle_result(result, metadata, metadata_file, index, total_count, name):
+    winner, fails, old_size = result
+
+    if winner == None:
+        fails = [a.fail for a in fails]
+        fail_priority = ['threshold-fail', 'compression-fail', 'conversion-error']
+
+        for fail in fail_priority:
+            if fail in fails:
+                safe_print(f'[{name}] fail outcome: {fail}')
+                return fail
+
+        assert False
+
+    metadata['ext'] = get_extension(winner.output_format)
+    metadata['size'] = winner.size
+    with open(metadata_file, 'w') as file:
+        json.dump(metadata, file)
+
+    print_result(winner, old_size, index, total_count, name)
+    return winner.output_format
 
 def process_one_new(dir_path, index, total_count, name):
     files = [f.path for f in os.scandir(dir_path) if not f.is_dir()]
@@ -685,40 +708,7 @@ def process_one_new(dir_path, index, total_count, name):
     path = paths[0]
 
     result = convert_to_best_new(path, name)
-    match result:
-        case None:
-            return 'conversion-error' # temporary
-        case 'compression_fail':
-            safe_print(f'[{name}] new size was bigger, skipping')
-            return 'compression-fail'
-        case 'conversion-error':
-            safe_print(f'[{name}] error during conversion, skipping')
-            return 'conversion-error'
-        case 'threshold-fail':
-            safe_print(f'[{name}] everyone failed the threshold or errored, skipping')
-            return 'threshold-fail'
-
-    winner, old_size = result
-
-    metadata['ext'] = get_extension(winner.output_format)
-    metadata['size'] = winner.size
-    with open(metadata_file, 'w') as file:
-        json.dump(metadata, file)
-
-    reduction = (1 - (winner.size / old_size)) * -100
-    index += 1
-    progress = (index / total_count) * 100
-    readable_old_size = human_size(old_size, False)
-    readable_new_size = human_size(winner.size, False)
-
-    to_print = f"[{name}] done.\t" \
-    f"old: {readable_old_size},\t" \
-    f"new: {readable_new_size},\t" \
-    f"r: {reduction:.2f}%,\t" \
-    f"{index}/{total_count} {progress:.2f}%"
-    safe_print(to_print)
-
-    return winner.output_format
+    return handle_result(result, metadata, metadata_file, index, total_count, name)
 
 def work(name, queue, total_count):
     while True:
