@@ -6,7 +6,7 @@ import threading
 import queue
 import time
 
-source_dir = '/Volumes/Athena/river-lib/small_lib copy'
+source_dir = '/Volumes/Athena/river-lib/tiny_jpg_lib copy'
 
 # --- conversion parameters ---
 
@@ -646,12 +646,16 @@ def print_result(winner, old_size, index, total_count, name):
     readable_old_size = human_size(old_size, False)
     readable_new_size = human_size(winner.size, False)
 
-    to_print = f"[{name}] done.\t" \
-    f"{winner.input_format}: {readable_old_size},\t" \
-    f"{winner.output_format}: {readable_new_size},\t" \
-    f"r: {reduction:.2f}%,\t" \
-    f"{index}/{total_count} {progress:.2f}%"
+    input_format_text = f"{winner.input_format}:"
+    output_format_text = f"{winner.output_format}:"
 
+    done_text = f"[{name}] done.   "
+    input_text = f"{input_format_text:<5}{readable_old_size:>10},"
+    output_text = f"{output_format_text:<15}{readable_new_size:>10},"
+    reduction_text = f"r: {reduction:>7.2f}%,"
+    progress_text = f"{index}/{total_count} {progress:.2f}%"
+
+    to_print = f'{done_text}{input_text:<19}{output_text:<30}{reduction_text:<15}{progress_text}'
     safe_print(to_print)
 
 def handle_result(result, metadata, metadata_file, index, total_count, name):
