@@ -69,11 +69,7 @@ success_outcomes = [
     'avif'
 ]
 
-fail_counter = {
-    'threshold-fail': 0,
-    'compression-fail': 0,
-    'conversion-error': 0
-}
+fail_counter = {}
 
 # --- logging ---
 
@@ -109,10 +105,25 @@ def get_fail_counter_text(fail_counter):
     fail_count = sum(list(fail_counter.values()))
     result += f'Total fails: {fail_count}\n\n'
 
-    for fail, count in fail_counter.items():
-        ratio = count / fail_count
-        fail_str = f'{fail}:'
-        result += f'{fail_str:<23} {count:>6} {ratio:>8.2%}\n'
+    fail_types = set([k.split('|')[1] for k in fail_counter.keys()])
+    output_formats = set([k.split('|')[0] for k in fail_counter.keys()])
+
+    for fail_type in fail_types:
+        fail_type_count = sum([fail_counter[a] for a in fail_counter.keys() if fail_type in a])
+
+        ratio = fail_type_count / fail_count
+        fail_str = f'{fail_type}:'
+        result += f'{fail_str:<23} {fail_type_count:>6} {ratio:>8.2%}\n'
+
+        for output_format in output_formats:
+            key = f'{output_format}|{fail_type}'
+            format_count = fail_counter[key] if key in fail_counter else 0
+
+            ratio = format_count / fail_type_count
+            format_str = f'    {output_format}:'
+            result += f'{format_str:<23} {format_count:>6} {ratio:>8.2%}\n'
+
+        result += '\n'
 
     return result.rstrip()
 
@@ -156,6 +167,9 @@ def get_avif_base_args(iteration):
 def get_size(dir_path):
     # -ks for size in kilobytes
     # -ms for size in megabytes
+
+    assert os.path.exists(dir_path)
+
     result = subprocess.run(['du', '-ks', dir_path], capture_output=True, text=True)
     return int(result.stdout.split('\t')[0])
 
@@ -302,7 +316,7 @@ def filter_losers(convertables, name):
 
     return [winner, fails + losers]
 
-def convert_to_best_new(path, name):
+def convert_image(path, name):
     conversions = [avif_conversion, jxl_lossy_conversion]
 
     old_path = Path(path)
@@ -350,17 +364,23 @@ def print_result(winner, old_size, index, total_count, name):
     safe_print(to_print)
 
 def handle_result(result, metadata, metadata_file, index, total_count, name):
-    winner, fails, old_size = result
+    winner, fail_items, old_size = result
 
-    fails = [a.fail for a in fails]
     with fail_counter_lock:
-        for fail in fails:
-            if fail != 'loser':
-                fail_counter[fail] += 1
+        for item in fail_items:
+            if item.fail == 'loser':
+                continue
+
+            key = f'{item.output_format}|{item.fail}'
+            if key not in fail_counter:
+                fail_counter[key] = 0
+
+            fail_counter[key] += 1
 
     if winner == None:
         fail_priority = ['threshold-fail', 'compression-fail', 'conversion-error']
 
+        fails = [a.fail for a in fail_items]
         for fail in fail_priority:
             if fail in fails:
                 safe_print(f'[{name}] fail outcome: {fail}')
@@ -376,7 +396,7 @@ def handle_result(result, metadata, metadata_file, index, total_count, name):
     print_result(winner, old_size, index, total_count, name)
     return winner.output_format
 
-def process_one_new(dir_path, index, total_count, name):
+def process_one(dir_path, index, total_count, name):
     files = [f.path for f in os.scandir(dir_path) if not f.is_dir()]
     metadata_file = [a for a in files if os.path.basename(a) == 'metadata.json']
     if not metadata_file:
@@ -407,14 +427,14 @@ def process_one_new(dir_path, index, total_count, name):
 
     path = paths[0]
 
-    result = convert_to_best_new(path, name)
+    result = convert_image(path, name)
     return handle_result(result, metadata, metadata_file, index, total_count, name)
 
 def work(name, queue, total_count):
     while True:
         index, image_dir = queue.get()
 
-        outcome = process_one_new(image_dir, index, total_count, name)
+        outcome = process_one(image_dir, index, total_count, name)
         with outcome_lock:
             outcomes[outcome] += 1
 
