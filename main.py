@@ -6,12 +6,12 @@ import threading
 import queue
 import time
 
-source_dir = '/Volumes/Athena/river-lib/medium_jpg_lib_75'
+source_dir = '/Volumes/Athena/river-lib/medium_jpg_lib_60'
 
 # --- conversion parameters ---
 
 force_img_format = None
-master_quality = 75
+master_quality = 60
 
 # if the lossy version saves less than this % of space,
 # we keep the smallest lossless version instead
@@ -41,6 +41,7 @@ print_log_lock = threading.Lock()
 jxl_win_count_lock = threading.Lock()
 outcome_lock = threading.Lock()
 fail_counter_lock = threading.Lock()
+reduction_records_lock = threading.Lock()
 
 # --- counters ---
 
@@ -70,6 +71,9 @@ success_outcomes = [
 ]
 
 fail_counter = {}
+
+max_reduction_records = 20
+reduction_records = []
 
 # --- logging ---
 
@@ -126,6 +130,19 @@ def get_fail_counter_text(fail_counter):
             result += f'{format_str:<23} {format_count:>6} {ratio:>8.2%}  all: {overall_ratio:>6.2%}\n'
 
         result += '\n'
+
+    return result.rstrip()
+
+def get_reduction_record_text(reduction_records):
+    result = '\nReduction records:\n\n'
+
+    for record in reduction_records:
+        name, input_format, output_format, old_size, new_size, reduction = record
+
+        readable_old_size = human_size(old_size, False)
+        readable_new_size = human_size(new_size, False)
+
+        result += f'{name} {input_format} {output_format} {readable_old_size} {readable_new_size} {-reduction:>8.2%}\n'
 
     return result.rstrip()
 
@@ -366,8 +383,36 @@ def print_result(winner, old_size, index, total_count, name):
     to_print = f'{done_text}{input_text:<19}{output_text:<30}{reduction_text:<15}{progress_text}'
     safe_print(to_print)
 
+def add_reduction_record(winner, fail_items, old_size):
+    reduction_records_lock.acquire()
+    global reduction_records
+
+    items = [winner] + fail_items
+    for item in items:
+        if item.size == None:
+            continue
+
+        reduction = (1 - (item.size / old_size))
+
+        name = Path(item.final_path).stem
+        new_item = [name, item.input_format, item.output_format, old_size, item.size, reduction]
+
+        has_space = len(reduction_records) < max_reduction_records
+        is_record = not has_space and (reduction_records[-1][-1] < reduction)
+
+        if has_space or is_record:
+            if is_record:
+                reduction_records.pop()
+
+            reduction_records.append(new_item)
+            reduction_records = sorted(reduction_records, key=lambda a: -a[-1])
+
+    reduction_records_lock.release()
+
 def handle_result(result, metadata, metadata_file, index, total_count, name):
     winner, fail_items, old_size = result
+
+    add_reduction_record(winner, fail_items, old_size)
 
     with fail_counter_lock:
         for item in fail_items:
@@ -485,6 +530,7 @@ def main():
 
     safe_print(get_outcome_text(outcomes))
     safe_print(get_fail_counter_text(fail_counter))
+    safe_print(get_reduction_record_text(reduction_records))
     safe_print(f'\nfinished in {elapsed:.2f}s, {(total_count / elapsed):.2f} files/s')
 
     log_path = log_dir + get_log_name()
