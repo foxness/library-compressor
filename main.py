@@ -533,7 +533,7 @@ def main():
     safe_print(get_reduction_record_text(reduction_records))
     safe_print(f'\nfinished in {elapsed:.2f}s, {(total_count / elapsed):.2f} files/s')
 
-    log_path = log_dir + get_log_name()
+    log_path = os.path.join(log_dir, get_log_name())
     with open(log_path, 'w') as file:
         file.write(conversion_log)
 
