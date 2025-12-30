@@ -6,7 +6,7 @@ import threading
 import queue
 import time
 
-source_dir = '/Volumes/Athena/river-lib/tiny_jpg_lib copy'
+source_dir = '/Volumes/Athena/river-lib/medium_jpg_lib_85'
 
 # --- conversion parameters ---
 
@@ -102,6 +102,7 @@ def get_outcome_text(outcomes):
 def get_fail_counter_text(fail_counter):
     result = '\n'
 
+    converted_count = sum([outcomes[a] for a in success_outcomes])
     fail_count = sum(list(fail_counter.values()))
     result += f'Total fails: {fail_count}\n\n'
 
@@ -120,8 +121,9 @@ def get_fail_counter_text(fail_counter):
             format_count = fail_counter[key] if key in fail_counter else 0
 
             ratio = format_count / fail_type_count
+            overall_ratio = format_count / converted_count
             format_str = f'    {output_format}:'
-            result += f'{format_str:<23} {format_count:>6} {ratio:>8.2%}\n'
+            result += f'{format_str:<23} {format_count:>6} {ratio:>8.2%}  all: {overall_ratio:>6.2%}\n'
 
         result += '\n'
 
