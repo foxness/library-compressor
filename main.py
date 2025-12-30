@@ -6,12 +6,12 @@ import threading
 import queue
 import time
 
-source_dir = '/Volumes/Athena/river-lib/medium_jpg_lib_85'
+source_dir = '/Volumes/Athena/river-lib/medium_jpg_lib_75'
 
 # --- conversion parameters ---
 
 force_img_format = None
-master_quality = 85
+master_quality = 75
 
 # if the lossy version saves less than this % of space,
 # we keep the smallest lossless version instead
@@ -130,10 +130,11 @@ def get_fail_counter_text(fail_counter):
     return result.rstrip()
 
 def get_log_name():
+    name = Path(source_dir).stem
     q = (jxl_quality if jxl_measure_is_quality else jxl_distance) if force_img_format == 'jxl' else avif_quality
     e = f'_e{encoder_thread_count}' if encoder_thread_count != None else ''
     f = f'_{force_img_format}' if force_img_format != None else ''
-    return f'log{f}_{q}_w{worker_count}{e}.log'
+    return f'{name}_log{f}_{q}_w{worker_count}{e}.log'
 
 def get_jxl_base_args(source_format, use_lossless_jpg, iteration):
     args = ['cjxl']
