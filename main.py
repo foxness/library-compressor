@@ -357,7 +357,7 @@ def convert_image(path, name):
     winner, fails = filter_losers(convertables, name)
 
     if winner == None:
-        return [None, fails, None]
+        return [None, fails, old_size]
 
     os.remove(path)
     os.rename(winner.temp_path, winner.final_path)
@@ -389,10 +389,10 @@ def add_reduction_record(winner, fail_items, old_size):
 
     items = [winner] + fail_items
     for item in items:
-        if item.size == None:
+        if item == None or item.size == None:
             continue
 
-        reduction = (1 - (item.size / old_size))
+        reduction = 1 - item.size / old_size
 
         name = Path(item.final_path).stem
         new_item = [name, item.input_format, item.output_format, old_size, item.size, reduction]
