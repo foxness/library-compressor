@@ -17,7 +17,7 @@ master_quality = 85
 # we keep the smallest lossless version instead
 lossy_throwaway_threshold = 0.03
 
-jxl_fighting_enabled = True # pick best between lossy and lossless
+jxl_try_lossless_transcode = True # pick best between lossy and lossless
 jxl_measure_is_quality = True
 jxl_quality = master_quality if master_quality != None else 85
 jxl_distance = 2
@@ -349,7 +349,7 @@ def convert_image(path, name):
     old_size = os.path.getsize(path)
     input_format = old_path.suffix.lower()[1:]
 
-    if (input_format == 'jpg' or input_format == 'jpeg') and jxl_fighting_enabled:
+    if (input_format == 'jpg' or input_format == 'jpeg') and jxl_try_lossless_transcode:
         conversions.append(jxl_lossless_conversion)
 
     convertables = []
@@ -532,7 +532,7 @@ def main():
     safe_print(f'converted {converted_count} files out of {total_count} ({(converted_count / total_count):.2%})')
     safe_print(f'old size: {human_size(size, True)}, new size: {human_size(new_size, True)}, reduction: {reduction:.2f}%')
 
-    if jxl_fighting_enabled and jxl_fight_count != 0:
+    if jxl_try_lossless_transcode and jxl_fight_count != 0:
         safe_print(f'jxl lossless wins: {(jxl_lossless_win_count / jxl_fight_count):.2%} ({jxl_lossless_win_count}/{jxl_fight_count})')
 
     safe_print(get_outcome_text(outcomes))
