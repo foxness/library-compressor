@@ -6,6 +6,8 @@ import threading
 import queue
 import time
 
+import conversion
+
 source_dir = '/Volumes/Athena/river-lib/small_lib copy'
 
 # --- conversion parameters ---
@@ -172,37 +174,6 @@ def get_log_name():
     f = f'_{force_img_format}' if force_img_format != None else ''
     return f'{name}_log{f}_{q}_w{worker_count}{e}.log'
 
-def get_jxl_base_args(source_format, use_lossless_jpg, iteration):
-    args = ['cjxl']
-
-    add_quality = True
-    match source_format:
-        case 'jpg' | 'jpeg':
-            args += [f'--lossless_jpeg={1 if use_lossless_jpg else 0}']
-            if use_lossless_jpg:
-                add_quality = False
-
-    if add_quality:
-        if jxl_measure_is_quality:
-            quality = jxl_quality - (iteration * 10)
-            args += ['-q', str(quality)]
-        else:
-            distance = jxl_distance + iteration
-            args += ['-d', str(distance)]
-
-    if encoder_thread_count != None:
-        args += [f'--num_threads={encoder_thread_count}']
-
-    return args
-
-def get_avif_base_args(iteration):
-    quality = avif_quality - (iteration * 10)
-    args = ['avifenc', '-q', str(quality)]
-    if encoder_thread_count != None:
-        args += ['-j', str(encoder_thread_count)]
-
-    return args
-
 def get_size(dir_path):
     # -ks for size in kilobytes
     # -ms for size in megabytes
@@ -254,7 +225,7 @@ def avif_conversion(path, input_format, name):
     temp_path = old_path.with_name(temp_name).resolve()
     final_path = old_path.with_name(final_name).resolve()
 
-    args = get_avif_base_args(0)
+    args = conversion.get_avif_base_args(avif_quality, encoder_thread_count)
     args += [path, temp_path]
 
     encode_result = subprocess.run(args, stdout=subprocess.DEVNULL)
@@ -274,7 +245,15 @@ def jxl_lossy_conversion(path, input_format, name):
     temp_path = old_path.with_name(temp_name).resolve()
     final_path = old_path.with_name(final_name).resolve()
 
-    args = get_jxl_base_args(input_format, False, 0)
+    args = conversion.get_jxl_base_args(
+        input_format,
+        False,
+        jxl_measure_is_quality,
+        jxl_quality,
+        jxl_distance,
+        encoder_thread_count
+    )
+
     args += [path, temp_path]
 
     encode_result = subprocess.run(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -294,7 +273,15 @@ def jxl_lossless_conversion(path, input_format, name):
     temp_path = old_path.with_name(temp_name).resolve()
     final_path = old_path.with_name(final_name).resolve()
 
-    args = get_jxl_base_args(input_format, True, 0)
+    args = conversion.get_jxl_base_args(
+        input_format,
+        True,
+        jxl_measure_is_quality,
+        jxl_quality,
+        jxl_distance,
+        encoder_thread_count
+    )
+
     args += [path, temp_path]
 
     encode_result = subprocess.run(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -351,7 +338,7 @@ def filter_losers(convertables, name):
     winner = size_sorted[0]
     losers = size_sorted[1:]
 
-    list_text = ', '.join([f'{a.output_format} ({human_size(a.size, False)})' for a in size_sorted])
+    list_text = ', '.join([f'[{a.output_format} {human_size(a.size, False)}]' for a in size_sorted])
     count = len(size_sorted)
     safe_print(f'[{name}] {count} candidate{'' if count == 1 else 's'}: {list_text}{'' if not fails else f', fails: {fail_text}'}')
 
