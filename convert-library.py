@@ -217,6 +217,12 @@ def size_comparison(size_a, size_b, is_kilobytes):
 
     return [a_diff, vs_text]
 
+def copy_file_times(old_file, new_file):
+    creation_time = os.stat(old_file).st_birthtime
+    modification_time = os.path.getmtime(old_file)
+
+    os.utime(new_file, (creation_time, modification_time))
+
 def avif_conversion(path, input_format, name):
     output_format = 'avif'
 
@@ -359,8 +365,9 @@ def convert_image(path, name):
     if winner == None:
         return [None, fails, old_size]
 
-    os.remove(path)
     os.rename(winner.temp_path, winner.final_path)
+    copy_file_times(path, winner.final_path)
+    os.remove(path)
 
     return [winner, fails, old_size]
 

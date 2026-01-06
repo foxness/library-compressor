@@ -1,5 +1,4 @@
 import os
-import json
 import subprocess
 from pathlib import Path
 import threading
@@ -7,12 +6,12 @@ import queue
 import time
 
 source_dir = '/Volumes/Athena/jxl_test/jpgset'
-output_dir = '/Volumes/Athena/jxl_test/output60'
+output_dir = '/Volumes/Athena/jxl_test/output80'
 
 # --- conversion parameters ---
 
 force_img_format = None
-master_quality = 60
+master_quality = 80
 
 # if the lossy version saves less than this % of space,
 # we keep the smallest lossless version instead
@@ -27,7 +26,7 @@ avif_quality = master_quality if master_quality != None else 85
 
 # --- multithreading ---
 
-worker_count = 8
+worker_count = 5
 encoder_thread_count = 5
 # optimal for jxl: w8 e4
 
@@ -56,9 +55,7 @@ outcomes = {
     'jxl-lossy': 0,
     'avif': 0,
 
-    'no-metadata': 0,
     'already-converted': 0,
-    'no-image': 0,
     'invalid-extension': 0,
     'compression-fail': 0,
     'threshold-fail': 0,
@@ -218,6 +215,12 @@ def size_comparison(size_a, size_b, is_kilobytes):
 
     return [a_diff, vs_text]
 
+def copy_file_times(old_file, new_file):
+    creation_time = os.stat(old_file).st_birthtime
+    modification_time = os.path.getmtime(old_file)
+
+    os.utime(new_file, (creation_time, modification_time))
+
 def avif_conversion(path, input_format, output_dir, name):
     output_format = 'avif'
 
@@ -361,6 +364,8 @@ def convert_image(path, output_dir, name):
         return [None, fails, old_size]
 
     os.rename(winner.temp_path, winner.final_path)
+    copy_file_times(path, winner.final_path)
+
     return [winner, fails, old_size]
 
 def print_result(winner, old_size, index, total_count, name):
