@@ -6,7 +6,7 @@ import threading
 import queue
 import time
 
-source_dir = '/Volumes/Athena/library_conversion_test/riverLibrary.library/images'
+source_dir = '/Volumes/Athena/river-lib/small_lib copy'
 
 # --- conversion parameters ---
 
@@ -42,6 +42,7 @@ jxl_win_count_lock = threading.Lock()
 outcome_lock = threading.Lock()
 fail_counter_lock = threading.Lock()
 reduction_records_lock = threading.Lock()
+disparity_records_lock = threading.Lock()
 
 # --- counters ---
 
@@ -75,9 +76,12 @@ fail_counter = {}
 max_reduction_records = 50
 reduction_records = []
 
+max_disparity_records = 50
+disparity_records = []
+
 # --- logging ---
 
-log_dir = '/Volumes/Athena/library_conversion_test'
+log_dir = '/Volumes/Athena/river-lib'
 conversion_log = ""
 
 class Convertable:
@@ -143,6 +147,21 @@ def get_reduction_record_text(reduction_records):
         readable_new_size = human_size(new_size, False)
 
         result += f'{name} {input_format} {output_format} {readable_old_size} {readable_new_size} {-reduction:>8.2%}\n'
+
+    return result.rstrip()
+
+def get_disparity_record_text(disparity_records):
+    result = '\nDisparity records:\n\n'
+
+    for record in disparity_records:
+        name, input_format, winner, winner_size, loser_size, disparity = record
+
+        loser = 'jxl-lossy' if winner == 'avif' else 'avif'
+
+        readable_winner_size = human_size(winner_size, False)
+        readable_loser_size = human_size(loser_size, False)
+
+        result += f'{name} {input_format} [{winner} {readable_winner_size}] [{loser} {readable_loser_size}] {-disparity:>8.2%}\n'
 
     return result.rstrip()
 
@@ -416,10 +435,47 @@ def add_reduction_record(winner, fail_items, old_size):
 
     reduction_records_lock.release()
 
+def add_disparity_record(winner, fail_items):
+    disparity_records_lock.acquire()
+    global disparity_records
+
+    items = [winner] + fail_items
+    items = [a for a in items if a is not None]
+
+    avif_items = [a for a in items if a.output_format == 'avif']
+    jxl_items = [a for a in items if a.output_format == 'jxl-lossy']
+
+    avif_size = avif_items[0].size if avif_items else None
+    jxl_size = jxl_items[0].size if jxl_items else None
+
+    if avif_size != None and jxl_size != None:
+        winner_size = min(avif_size, jxl_size)
+        loser_size = max(avif_size, jxl_size)
+        winner = 'avif' if avif_size < jxl_size else 'jxl-lossy'
+
+        disparity = 1 - winner_size / loser_size
+
+        item = avif_items[0]
+        name = Path(item.final_path).stem
+        new_item = [name, item.input_format, winner, winner_size, loser_size, disparity]
+
+        has_space = len(disparity_records) < max_disparity_records
+        is_record = not has_space and (disparity_records[-1][-1] < disparity)
+
+        if has_space or is_record:
+            if is_record:
+                disparity_records.pop()
+
+            disparity_records.append(new_item)
+            disparity_records = sorted(disparity_records, key=lambda a: -a[-1])
+
+    disparity_records_lock.release()
+
 def handle_result(result, metadata, metadata_file, index, total_count, name):
     winner, fail_items, old_size = result
 
     add_reduction_record(winner, fail_items, old_size)
+    add_disparity_record(winner, fail_items)
 
     with fail_counter_lock:
         for item in fail_items:
@@ -538,6 +594,10 @@ def main():
     safe_print(get_outcome_text(outcomes))
     safe_print(get_fail_counter_text(fail_counter))
     safe_print(get_reduction_record_text(reduction_records))
+
+    if disparity_records:
+        safe_print(get_disparity_record_text(disparity_records))
+
     safe_print(f'\nfinished in {elapsed:.2f}s, {(total_count / elapsed):.2f} files/s')
 
     log_path = os.path.join(log_dir, get_log_name())
