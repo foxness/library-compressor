@@ -1,10 +1,8 @@
 import os
 import json
 import subprocess
-from pathlib import Path
 import threading
 import queue
-import time
 
 input_dir = '/Volumes/Athena/river-lib/huge_jpg_lib'
 

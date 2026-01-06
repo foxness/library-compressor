@@ -6,12 +6,12 @@ import threading
 import queue
 import time
 
-source_dir = '/Volumes/Athena/river-lib/medium_jpg_lib_60'
+source_dir = '/Volumes/Athena/library_conversion_test/riverLibrary.library/images'
 
 # --- conversion parameters ---
 
 force_img_format = None
-master_quality = 60
+master_quality = 85
 
 # if the lossy version saves less than this % of space,
 # we keep the smallest lossless version instead
@@ -33,7 +33,7 @@ encoder_thread_count = None
 # --- extensions ---
 
 converted_extensions = ['avif', 'jxl', 'webp']
-valid_extensions = ['png', 'jpg', 'jpeg', 'gif']
+valid_extensions = ['png', 'jpg', 'jpeg']
 
 # --- locks ---
 
@@ -72,12 +72,12 @@ success_outcomes = [
 
 fail_counter = {}
 
-max_reduction_records = 20
+max_reduction_records = 50
 reduction_records = []
 
 # --- logging ---
 
-log_dir = '/Volumes/Athena/river-lib/'
+log_dir = '/Volumes/Athena/library_conversion_test'
 conversion_log = ""
 
 class Convertable:

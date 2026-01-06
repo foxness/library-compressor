@@ -16,7 +16,7 @@ iteration_count = 2
 encoder_thread_count = None
 
 converted_extensions = ['avif', 'jxl', 'webp']
-valid_extensions = ['png', 'jpg', 'jpeg', 'gif']
+valid_extensions = ['png', 'jpg', 'jpeg']
 
 print_lock = threading.Lock()
 
