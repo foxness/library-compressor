@@ -8,12 +8,12 @@ import time
 import conversion
 
 source_dir = '/Volumes/Athena/jxl_test/jpgset'
-output_dir = '/Volumes/Athena/jxl_test/output70'
+output_dir = '/Volumes/Athena/jxl_test/output60'
 
 # --- conversion parameters ---
 
 force_img_format = None
-master_quality = 70
+master_quality = 60
 
 # if the lossy version saves less than this % of space,
 # we keep the smallest lossless version instead
@@ -28,7 +28,7 @@ avif_quality = master_quality if master_quality != None else 85
 
 # --- multithreading ---
 
-worker_count = 5
+worker_count = 8
 encoder_thread_count = 5
 # optimal for jxl: w8 e4
 
@@ -83,16 +83,6 @@ disparity_records = []
 
 log_dir = '/Volumes/Athena/jxl_test'
 conversion_log = ""
-
-class Convertable:
-    def __init__(self, input_format, output_format, temp_path, final_path, return_code):
-        self.input_format = input_format
-        self.output_format = output_format
-        self.temp_path = temp_path
-        self.final_path = final_path
-        self.return_code = return_code
-        self.fail = None
-        self.size = None
 
 def get_outcome_text(outcomes):
     result = '\n'
@@ -193,9 +183,6 @@ def safe_print(*a, **b):
 def passes_lossy_threshold(old_size, new_size):
     return new_size < old_size * (1 - lossy_throwaway_threshold)
 
-def get_extension(img_format):
-    return img_format.split('-')[0]
-
 def size_comparison(size_a, size_b, is_kilobytes):
     a_diff = size_a / size_b - 1
 
@@ -210,82 +197,6 @@ def copy_file_times(old_file, new_file):
     modification_time = os.path.getmtime(old_file)
 
     os.utime(new_file, (creation_time, modification_time))
-
-def avif_conversion(path, input_format, output_dir, name):
-    output_format = 'avif'
-
-    old_path = Path(path)
-    extension = get_extension(output_format)
-
-    temp_name = f'{old_path.stem}_{output_format}.{extension}'
-    final_name = f'{old_path.stem}.{extension}'
-
-    temp_path = os.path.join(output_dir, temp_name)
-    final_path = os.path.join(output_dir, final_name)
-
-    args = conversion.get_avif_base_args(avif_quality, encoder_thread_count)
-    args += [path, temp_path]
-
-    encode_result = subprocess.run(args, stdout=subprocess.DEVNULL)
-    return_code = encode_result.returncode
-
-    return Convertable(input_format, output_format, temp_path, final_path, return_code)
-
-def jxl_lossy_conversion(path, input_format, output_dir, name):
-    output_format = 'jxl-lossy'
-
-    old_path = Path(path)
-    extension = get_extension(output_format)
-
-    temp_name = f'{old_path.stem}_{output_format}.{extension}'
-    final_name = f'{old_path.stem}.{extension}'
-
-    temp_path = os.path.join(output_dir, temp_name)
-    final_path = os.path.join(output_dir, final_name)
-
-    args = conversion.get_jxl_base_args(
-        input_format,
-        False,
-        jxl_measure_is_quality,
-        jxl_quality,
-        jxl_distance,
-        encoder_thread_count
-    )
-
-    args += [path, temp_path]
-
-    encode_result = subprocess.run(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    return_code = encode_result.returncode
-
-    return Convertable(input_format, output_format, temp_path, final_path, return_code)
-
-def jxl_lossless_conversion(path, input_format, output_dir, name):
-    output_format = 'jxl-lossless'
-
-    old_path = Path(path)
-    extension = get_extension(output_format)
-
-    temp_name = f'{old_path.stem}_{output_format}.{extension}'
-    final_name = f'{old_path.stem}.{extension}'
-
-    temp_path = os.path.join(output_dir, temp_name)
-    final_path = os.path.join(output_dir, final_name)
-
-    args = conversion.get_jxl_base_args(
-        input_format,
-        True,
-        jxl_measure_is_quality,
-        jxl_quality,
-        jxl_distance,
-        encoder_thread_count
-    )
-
-    args += [path, temp_path]
-
-    encode_result = subprocess.run(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    return_code = encode_result.returncode
-
-    return Convertable(input_format, output_format, temp_path, final_path, return_code)
 
 def handle_errors(convertable, name):
     if convertable.return_code == 0:
@@ -347,18 +258,26 @@ def filter_losers(convertables, name):
     return [winner, fails + losers]
 
 def convert_image(path, output_dir, name):
-    conversions = [avif_conversion, jxl_lossy_conversion]
+    conversions = [conversion.avif_conversion, conversion.jxl_lossy_conversion]
 
     old_path = Path(path)
     old_size = os.path.getsize(path)
     input_format = old_path.suffix[1:].lower()
 
     if (input_format == 'jpg' or input_format == 'jpeg') and jxl_try_lossless_transcode:
-        conversions.append(jxl_lossless_conversion)
+        conversions.append(conversion.jxl_lossless_conversion)
+
+    params = conversion.ConversionParameters(
+        jxl_quality,
+        jxl_distance,
+        jxl_measure_is_quality,
+        avif_quality,
+        encoder_thread_count
+    )
 
     convertables = []
-    for conversion in conversions:
-        convertable = conversion(path, input_format, output_dir, name)
+    for conv in conversions:
+        convertable = conv(params, path, input_format, output_dir, name)
         handle_errors(convertable, name)
 
         convertables.append(convertable)
@@ -531,6 +450,7 @@ def start_work(images, output_dir):
 def main():
     size = get_size(source_dir)
     source_images = [f.path for f in os.scandir(source_dir) if not f.is_dir()]
+    source_images = sorted(source_images)
 
     total_count = len(source_images)
 
