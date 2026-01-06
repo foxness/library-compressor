@@ -6,18 +6,19 @@ import threading
 import queue
 import time
 
-source_dir = '/Volumes/Athena/library_conversion_test/riverLibrary.library/images'
+source_dir = '/Volumes/Athena/jxl_test/jpgset'
+output_dir = '/Volumes/Athena/jxl_test/output60'
 
 # --- conversion parameters ---
 
 force_img_format = None
-master_quality = 85
+master_quality = 60
 
 # if the lossy version saves less than this % of space,
 # we keep the smallest lossless version instead
 lossy_throwaway_threshold = 0.03
 
-jxl_fighting_enabled = True # pick best between lossy and lossless
+jxl_fighting_enabled = False # pick best between lossy and lossless
 jxl_measure_is_quality = True
 jxl_quality = master_quality if master_quality != None else 85
 jxl_distance = 2
@@ -27,7 +28,7 @@ avif_quality = master_quality if master_quality != None else 85
 # --- multithreading ---
 
 worker_count = 8
-encoder_thread_count = None
+encoder_thread_count = 5
 # optimal for jxl: w8 e4
 
 # --- extensions ---
@@ -77,7 +78,7 @@ reduction_records = []
 
 # --- logging ---
 
-log_dir = '/Volumes/Athena/library_conversion_test'
+log_dir = '/Volumes/Athena/jxl_test'
 conversion_log = ""
 
 class Convertable:
@@ -217,7 +218,7 @@ def size_comparison(size_a, size_b, is_kilobytes):
 
     return [a_diff, vs_text]
 
-def avif_conversion(path, input_format, name):
+def avif_conversion(path, input_format, output_dir, name):
     output_format = 'avif'
 
     old_path = Path(path)
@@ -226,8 +227,8 @@ def avif_conversion(path, input_format, name):
     temp_name = f'{old_path.stem}_{output_format}.{extension}'
     final_name = f'{old_path.stem}.{extension}'
 
-    temp_path = old_path.with_name(temp_name).resolve()
-    final_path = old_path.with_name(final_name).resolve()
+    temp_path = os.path.join(output_dir, temp_name)
+    final_path = os.path.join(output_dir, final_name)
 
     args = get_avif_base_args(0)
     args += [path, temp_path]
@@ -237,7 +238,7 @@ def avif_conversion(path, input_format, name):
 
     return Convertable(input_format, output_format, temp_path, final_path, return_code)
 
-def jxl_lossy_conversion(path, input_format, name):
+def jxl_lossy_conversion(path, input_format, output_dir, name):
     output_format = 'jxl-lossy'
 
     old_path = Path(path)
@@ -246,8 +247,8 @@ def jxl_lossy_conversion(path, input_format, name):
     temp_name = f'{old_path.stem}_{output_format}.{extension}'
     final_name = f'{old_path.stem}.{extension}'
 
-    temp_path = old_path.with_name(temp_name).resolve()
-    final_path = old_path.with_name(final_name).resolve()
+    temp_path = os.path.join(output_dir, temp_name)
+    final_path = os.path.join(output_dir, final_name)
 
     args = get_jxl_base_args(input_format, False, 0)
     args += [path, temp_path]
@@ -257,7 +258,7 @@ def jxl_lossy_conversion(path, input_format, name):
 
     return Convertable(input_format, output_format, temp_path, final_path, return_code)
 
-def jxl_lossless_conversion(path, input_format, name):
+def jxl_lossless_conversion(path, input_format, output_dir, name):
     output_format = 'jxl-lossless'
 
     old_path = Path(path)
@@ -266,8 +267,8 @@ def jxl_lossless_conversion(path, input_format, name):
     temp_name = f'{old_path.stem}_{output_format}.{extension}'
     final_name = f'{old_path.stem}.{extension}'
 
-    temp_path = old_path.with_name(temp_name).resolve()
-    final_path = old_path.with_name(final_name).resolve()
+    temp_path = os.path.join(output_dir, temp_name)
+    final_path = os.path.join(output_dir, final_name)
 
     args = get_jxl_base_args(input_format, True, 0)
     args += [path, temp_path]
@@ -336,19 +337,19 @@ def filter_losers(convertables, name):
 
     return [winner, fails + losers]
 
-def convert_image(path, name):
+def convert_image(path, output_dir, name):
     conversions = [avif_conversion, jxl_lossy_conversion]
 
     old_path = Path(path)
     old_size = os.path.getsize(path)
-    input_format = old_path.suffix.lower()[1:]
+    input_format = old_path.suffix[1:].lower()
 
     if (input_format == 'jpg' or input_format == 'jpeg') and jxl_fighting_enabled:
         conversions.append(jxl_lossless_conversion)
 
     convertables = []
     for conversion in conversions:
-        convertable = conversion(path, input_format, name)
+        convertable = conversion(path, input_format, output_dir, name)
         handle_errors(convertable, name)
 
         convertables.append(convertable)
@@ -359,9 +360,7 @@ def convert_image(path, name):
     if winner == None:
         return [None, fails, old_size]
 
-    os.remove(path)
     os.rename(winner.temp_path, winner.final_path)
-
     return [winner, fails, old_size]
 
 def print_result(winner, old_size, index, total_count, name):
@@ -409,7 +408,7 @@ def add_reduction_record(winner, fail_items, old_size):
 
     reduction_records_lock.release()
 
-def handle_result(result, metadata, metadata_file, index, total_count, name):
+def handle_result(result, index, total_count, name):
     winner, fail_items, old_size = result
 
     add_reduction_record(winner, fail_items, old_size)
@@ -436,30 +435,14 @@ def handle_result(result, metadata, metadata_file, index, total_count, name):
 
         assert False
 
-    metadata['ext'] = get_extension(winner.output_format)
-    metadata['size'] = winner.size
-    with open(metadata_file, 'w') as file:
-        json.dump(metadata, file)
-
     print_result(winner, old_size, index, total_count, name)
     return winner.output_format
 
-def process_one(dir_path, index, total_count, name):
-    files = [f.path for f in os.scandir(dir_path) if not f.is_dir()]
-    metadata_file = [a for a in files if os.path.basename(a) == 'metadata.json']
-    if not metadata_file:
-        safe_print(f'[{name}] couldn\'t find metadata file, skipping')
-        return 'no-metadata'
+def process_one(image_path, index, total_count, output_dir, name):
+    path = Path(image_path)
+    safe_print(f'[{name}] processing {path.name}')
 
-    metadata_file = metadata_file[0]
-
-    with open(metadata_file, 'r') as file:
-        metadata = json.load(file)
-
-    extension = metadata['ext']
-    image_name = metadata['name'] + '.' + extension
-    safe_print(f'[{name}] processing {image_name}')
-
+    extension = path.suffix[1:].lower()
     if extension in converted_extensions:
         safe_print(f'[{name}] {extension} is already converted, skipping')
         return 'already-converted'
@@ -468,57 +451,50 @@ def process_one(dir_path, index, total_count, name):
         safe_print(f'[{name}] {extension} is not a valid extension, skipping')
         return 'invalid-extension'
 
-    paths = [a for a in files if os.path.basename(a) == image_name]
-    if not paths:
-        safe_print(f'[{name}] could not find the image, skipping')
-        return 'no-image'
+    result = convert_image(image_path, output_dir, name)
+    return handle_result(result, index, total_count, name)
 
-    path = paths[0]
-
-    result = convert_image(path, name)
-    return handle_result(result, metadata, metadata_file, index, total_count, name)
-
-def work(name, queue, total_count):
+def work(name, queue, total_count, output_dir):
     while True:
-        index, image_dir = queue.get()
+        index, image = queue.get()
 
-        outcome = process_one(image_dir, index, total_count, name)
+        outcome = process_one(image, index, total_count, output_dir, name)
         with outcome_lock:
             outcomes[outcome] += 1
 
         queue.task_done()
 
-def start_work(image_dirs):
+def start_work(images, output_dir):
     q = queue.Queue()
-    total_count = len(image_dirs)
+    total_count = len(images)
 
     workers = []
     for i in range(worker_count):
-        workerThread = threading.Thread(target=work, args=[f'W{i:02d}', q, total_count], daemon=True)
+        workerThread = threading.Thread(target=work, args=[f'W{i:02d}', q, total_count, output_dir], daemon=True)
         workers.append(workerThread)
         workerThread.start()
 
-    for index, image_dir in enumerate(image_dirs):
-        q.put([index, image_dir])
+    for index, image in enumerate(images):
+        q.put([index, image])
 
     q.join()
     safe_print('\nall work completed')
 
 def main():
     size = get_size(source_dir)
-    image_dirs = [f.path for f in os.scandir(source_dir) if f.is_dir()]
+    source_images = [f.path for f in os.scandir(source_dir) if not f.is_dir()]
 
-    total_count = len(image_dirs)
+    total_count = len(source_images)
 
     start = time.time()
     safe_print(f'starting conversion of {source_dir}')
 
-    start_work(image_dirs)
+    start_work(source_images, output_dir)
 
     end = time.time()
     elapsed = end - start
 
-    new_size = get_size(source_dir)
+    new_size = get_size(output_dir)
     reduction = (1 - (new_size / size)) * -100
 
     converted_count = sum([outcomes[a] for a in success_outcomes])
