@@ -7,19 +7,21 @@ import time
 
 import conversion
 
-source_dir = '/Volumes/Athena/jxl_test/jpgset'
-output_dir = '/Volumes/Athena/jxl_test/output60'
+source_dir = '/Volumes/Athena/screenconvtest/gen0_jpg'
+output_dir = '/Volumes/Athena/screenconvtest/gen0_jpg_out'
+
+log_dir = '/Volumes/Athena/screenconvtest'
 
 # --- conversion parameters ---
 
 force_img_format = None
-master_quality = 60
+master_quality = 85
 
 # if the lossy version saves less than this % of space,
 # we keep the smallest lossless version instead
 lossy_throwaway_threshold = 0.1
 
-jxl_try_lossless_transcode = False # pick best between lossy and lossless
+jxl_try_lossless_transcode = True # pick best between lossy and lossless
 jxl_measure_is_quality = True
 jxl_quality = master_quality if master_quality != None else 85
 jxl_distance = 2
@@ -29,7 +31,7 @@ avif_quality = master_quality if master_quality != None else 85
 # --- multithreading ---
 
 worker_count = 8
-encoder_thread_count = 5
+encoder_thread_count = 4
 # optimal for jxl: w8 e4
 
 # --- extensions ---
@@ -81,7 +83,6 @@ disparity_records = []
 
 # --- logging ---
 
-log_dir = '/Volumes/Athena/jxl_test'
 conversion_log = ""
 
 def get_outcome_text(outcomes):

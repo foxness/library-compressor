@@ -8,11 +8,11 @@ import time
 import random
 import string
 
-source_dir = '/Volumes/Athena/river-lib/huge_png_lib'
-output_dir = '/Volumes/Athena/river-lib/compare_output'
+source_dir = '/Volumes/Athena/mifunysofle'
+output_dir = '/Volumes/Athena/compare'
 
 image_count = 40
-iteration_count = 2
+iteration_count = 4
 encoder_thread_count = None
 
 converted_extensions = ['avif', 'jxl', 'webp']
@@ -82,7 +82,7 @@ def convert_many(path):
     result = subprocess.run(['cp', path, new_orig_path], stdout=subprocess.DEVNULL)
     for img_format in ['jxl', 'avif']:
         for i in range(iteration_count):
-            quality = 85 - i * 20
+            quality = 90 - i * 10
             convert(path, output_dir, prefix, img_format, quality)
             print(f'{prefix} {img_format}{quality}')
 
@@ -115,11 +115,11 @@ def safe_print(*a, **b):
     with print_lock:
         print(*a, **b)
 
-def main():
+def main_dirs():
     image_dirs = [f.path for f in os.scandir(source_dir) if f.is_dir()]
 
     converted_images = 0
-    while converted_images < image_count:
+    while converted_images < image_count and len(image_dirs) > 0:
         image_dir = random.choice(image_dirs)
         image_dirs.remove(image_dir)
 
@@ -127,4 +127,16 @@ def main():
         if did_process:
             converted_images += 1
 
-main()
+def main_images():
+    images = [f.path for f in os.scandir(source_dir) if not f.is_dir()]
+
+    converted_images = 0
+    while converted_images < image_count and len(images) > 0:
+        image = random.choice(images)
+        images.remove(image)
+
+        did_process = convert_many(image)
+        if did_process:
+            converted_images += 1
+
+main_images()
