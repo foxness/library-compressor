@@ -14,8 +14,8 @@ log_dir = '/Volumes/Athena/screenconvtest'
 
 # --- conversion parameters ---
 
-force_img_format = None
-master_quality = 85
+force_img_format = 'avif'
+master_quality = 70
 
 # if the lossy version saves less than this % of space,
 # we keep the smallest lossless version instead
@@ -261,11 +261,20 @@ def filter_losers(convertables, name):
 def convert_image(path, output_dir, name):
     conversions = [conversion.avif_conversion, conversion.jxl_lossy_conversion]
 
+    if force_img_format != None:
+        match force_img_format:
+            case 'jxl-lossy':
+                conversions = [conversion.jxl_lossy_conversion]
+            case 'jxl-lossless':
+                conversions = [conversion.jxl_lossless_conversion]
+            case 'avif':
+                conversions = [conversion.avif_conversion]
+
     old_path = Path(path)
     old_size = os.path.getsize(path)
     input_format = old_path.suffix[1:].lower()
 
-    if (input_format == 'jpg' or input_format == 'jpeg') and jxl_try_lossless_transcode:
+    if (input_format == 'jpg' or input_format == 'jpeg') and jxl_try_lossless_transcode and force_img_format == None:
         conversions.append(conversion.jxl_lossless_conversion)
 
     params = conversion.ConversionParameters(
